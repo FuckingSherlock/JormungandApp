@@ -401,13 +401,26 @@ void main() {
       expect(host.networkSettingsOpened, 1);
     });
 
-    testWidgets('a failed DNS server offers Check now and Open, and no switch of server', (tester) async {
+    testWidgets('DNS does not answer has no switch of server; an old dns/failed record is still read as a row', (tester) async {
       final host = FakeCoreHost();
-      _add(host, 'dns', 'failed', data: const {'server': 'Cloudflare', 'side': 'vpn'});
+      _add(host, 'dns', 'down', level: 'error', data: const {
+        'sides': [
+          {
+            'side': 'vpn',
+            'servers': [
+              {'provider': 'p-ag', 'name': 'AdGuard', 'kinds': ['udp']},
+            ],
+            'selected': 'p-ag',
+          },
+        ],
+        'noSpare': true,
+        'cause': {'kind': 'none'},
+      });
+      final old = _add(host, 'dns', 'failed', s: 1, data: const {'server': 'Cloudflare', 'side': 'vpn'});
       await pumpApp(tester, host);
       await _openLogs(tester);
-      expect(find.text('Check now'), findsOneWidget);
-      expect(find.text('Open'), findsOneWidget);
+      expect(find.text('DNS does not answer'), findsOneWidget, reason: 'the card title of dns/down (typeDnsDown)');
+      expect(find.text(_titleOf(host, old)), findsOneWidget, reason: 'an old record is read, not dropped');
       expect(find.text('Switch server'), findsNothing);
     });
 
@@ -416,7 +429,7 @@ void main() {
     ) async {
       final host = FakeCoreHost();
       _add(host, 'conn', 'lost', data: const {'recheck': {'state': 'pending'}});
-      _add(host, 'dns', 'failed', s: 1, data: const {'server': 'Cloudflare', 'side': 'vpn', 'recheck': {'state': 'fail'}});
+      _add(host, 'auto', 'unstable', s: 1, data: const {'id': 'e0', 'strikes': 2, 'holdMs': 60000, 'recheck': {'state': 'fail'}});
       await pumpApp(tester, host);
       await _openLogs(tester);
       expect(find.text('Checking…'), findsOneWidget);
@@ -427,23 +440,25 @@ void main() {
     });
 
     for (final type in ['blocked', 'unreachable']) {
-      testWidgets('site/$type: the folded row holds Check with checker, Create rule (blocked only), Ignore site; Copy site only in the opened row', (
+      testWidgets('site/$type: the card holds Details ▾ and Ignore site ▾; no Check again, no Check with checker button; Create <host> rule only for blocked', (
         tester,
       ) async {
         final host = FakeCoreHost();
-        final e = _add(host, 'site', type, data: const {'host': 'dead.example.com', 'via': 'nope', 'tried': []});
+        _add(host, 'site', type, data: const {'host': 'dead.example.com', 'via': 'nope', 'tried': []});
         await pumpApp(tester, host);
         await _openLogs(tester);
 
-        for (final b in ['Check with checker', 'Ignore site']) {
+        for (final b in ['Details ▾', 'Ignore site ▾']) {
           expect(find.text(b), findsOneWidget, reason: b);
         }
-        // unreachable has no working target: no Create rule (decision 2026-10-21)
-        expect(find.text('Create rule'), type == 'blocked' ? findsOneWidget : findsNothing);
-        // without Create rule the third folded slot goes to Copy site
-        expect(find.text('Copy site'), type == 'blocked' ? findsNothing : findsOneWidget);
-        await _expand(tester, _titleOf(host, e));
-        expect(find.text('Copy site'), findsOneWidget);
+        expect(find.text('Check again'), findsNothing);
+        expect(find.text('Check with checker'), findsNothing, reason: 'the checker is a Checked row now');
+        // the Rule row of the opened card: Create <host> rule for blocked (unreachable: spec conflict, not asserted)
+        if (type == 'blocked') {
+          await tester.tap(find.textContaining('dead.example.com').first);
+          await tester.pump(const Duration(milliseconds: 500));
+          expect(find.text('Create dead.example.com rule'), findsOneWidget);
+        }
       });
     }
   });

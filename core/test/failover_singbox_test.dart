@@ -458,12 +458,14 @@ void main() {
       expect(fell, hasLength(1));
       expect([fell.single['type'], fell.single['level']], ['fallback', 'warn']);
       expect(fell.single['data'], {'rule': 'Dead rule', 'target': 'src:dead', 'to': 'block'});
-      // the miss turns the flag off and the side moves to the other at once (dns/switched), the Sentinel confirms the
-      // server down after it (dns/failed)
-      expect(moved.map((e) => e['type']), ['switched', 'failed']);
-      expect(moved.last['data'], containsPair('server', 'a-udp1'));
-      expect(moved.last['data'], containsPair('side', 'direct'));
-      expect(moved.first['data'], {'side': 'direct', 'from': 'a-udp1', 'to': 'b-udp1', 'fromProvider': 'a', 'toProvider': 'b', 'reason': 'failover'});
+      // the miss turns the flag off and the side moves to the other at once: one dns/switched (the Sentinel's verdict
+      // adds no dns/failed any more)
+      expect(moved.map((e) => e['type']), ['switched']);
+      final md = moved.single['data'] as Map;
+      expect(md['reason'], 'failover');
+      final ms = (md['sides'] as List).cast<Map>().single;
+      expect([ms['side'], (ms['from'] as Map)['provider'], (ms['to'] as Map)['provider']], ['direct', 'a', 'b']);
+      expect(md.containsKey('fromProvider') || md.containsKey('server'), isFalse, reason: 'the old flat fields are gone');
       var dns = (await call('/api/status'))['dns'] as Map;
       expect([dns['active'], dns['auto']], ['b-udp1', true]);
       expect((dns['sides'] as Map)['direct'], {'active': 'b-udp1', 'provider': 'b'});
@@ -596,7 +598,10 @@ void main() {
       expect(fo.active, 'a-udp1');
       expect(await _reached(mixed, 'viaip3', target.port, a), isTrue, reason: 'and back to a');
       await Future<void>.delayed(Duration.zero);
-      expect([for (final m in moves) '${m.side} ${m.from}>${m.to} ${m.reason}'], ['direct a-udp1>b-udp1 failover', 'direct b-udp1>a-udp1 back']);
+      expect(
+        [for (final m in moves) for (final s in m.sides) '${s.side} ${s.from.provider}>${s.to.provider}/${s.to.kind} ${m.reason}'],
+        ['direct a>b/udp failover', 'direct b>a/udp back'],
+      );
       expect(notes.where((n) => n.startsWith('warn')), isEmpty, reason: notes.join('\n'));
     } finally {
       fo?.stop();

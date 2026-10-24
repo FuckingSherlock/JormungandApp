@@ -30,36 +30,26 @@ void main() {
     final host = FakeCoreHost()
       ..checkGate = Completer<void>()
       ..checkAnswer = {'state': 'down', 'ok': 0, 'total': 2, 'via': 'tunnel', 'nodes': _nodes};
-    final e = host.addEvent('site', 'unreachable', level: 'warn', data: _gone);
+    // the card has no «Check with checker» button (connect-model «Карточка сайта»): the checker is asked again by a tap on
+    // its row in Checked; the first answer comes by itself, so the event starts with an earlier one
+    final e = host.addEvent('site', 'unreachable', level: 'warn', data: {..._gone, 'check': {'state': 'failed'}});
     await pumpApp(tester, host);
     await tester.tap(find.byIcon(AppTab.logs.icon));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('evCheck')), findsNothing);
-    expect(find.textContaining('No other working route to try'), findsWidgets, reason: 'before the checker answers the event speaks of our routes');
+    expect(find.text('Check with checker'), findsNothing);
+    expect(find.text('check-host.net · HTTP'), findsOneWidget);
 
-    await tester.tap(find.text('Check with checker'));
+    await tester.tap(find.byKey(const ValueKey('eventCard.retry')));
     await tester.pump(const Duration(milliseconds: 400));
     expect(host.checkedSites, [e['id']]);
-    expect(find.text('Checking…'), findsOneWidget, reason: 'the button waits for the answer');
-    expect(find.text('Asking check-host…'), findsOneWidget);
 
     host.checkGate!.complete();
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pump(const Duration(seconds: 4)); // the slow poll too
-    expect(find.text('Down everywhere (check-host)'), findsOneWidget);
-    expect(find.text('Check with checker'), findsOneWidget, reason: 'it can be asked again');
+    expect(find.textContaining('opens on 0 of 2 nodes'), findsOneWidget);
+    expect(find.textContaining('Down everywhere (check-host)', findRichText: true), findsOneWidget, reason: 'the Cause line');
     expect(host.journal.length, 1, reason: 'the event is changed in place, not repeated');
     expect(find.textContaining('No other working route to try'), findsNothing, reason: 'down everywhere: our routes are not part of the event');
-
-    // an opened row lists the checker's nodes
-    await tester.tap(find.text('Down everywhere (check-host)'));
-    await tester.pumpAndSettle();
-    expect(find.text('Also tried'), findsNothing);
-    expect(find.text('Entry'), findsNothing);
-    expect(find.textContaining('No other working route to try'), findsNothing);
-    expect(find.text('Germany, Frankfurt'), findsOneWidget);
-    expect(find.text('OK 200 · 200ms'), findsOneWidget);
-    expect(find.text('Connection timed out'), findsOneWidget);
     await tester.pumpAndSettle(const Duration(seconds: 5));
   });
 

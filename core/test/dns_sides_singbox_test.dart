@@ -513,8 +513,11 @@ void main() {
       expect(fo.activeOf('direct'), 'a-udp1');
       await until('dir.test', 'd0');
       await Future<void>.delayed(Duration.zero);
-      expect([for (final m in moves) '${m.side} ${m.from}>${m.to} ${m.reason}'], ['direct a-udp1>b-udp1 failover', 'direct b-udp1>a-udp1 back']);
-      expect([moves.first.fromProvider, moves.first.toProvider], ['a', 'b']);
+      expect(
+        [for (final m in moves) for (final s in m.sides) '${s.side} ${s.from.provider}>${s.to.provider}/${s.to.kind} ${m.reason}'],
+        ['direct a>b/udp failover', 'direct b>a/udp back'],
+      );
+      expect([for (final m in moves) m.sides.length], [1, 1], reason: 'only the dead server\'s side moves');
     } finally {
       fo?.stop();
       sentinel.dispose();

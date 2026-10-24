@@ -435,34 +435,29 @@ void main() {
       expect(back.single['opens'], id);
     });
 
-    test('dns/failed: the server answering again closes it with dns/switched', () async {
+    test('dns/down: every server silent is one dns/down; the server answering again (the failover\'s own re-ask) closes it with dns/up', () async {
       await start();
-      // only g: when the spare h and the path miss too, the failure is the path's, not the server's
-      socks().refuse.add((u) => u == 'dns-check/dns-g-udp1');
-      final seed = add('dns', 'failed', {'server': 'g-udp1'});
-      for (var i = 0; i < 6 && !all().any((e) => e['cat'] == 'dns' && e['type'] == 'failed' && e['id'] != seed); i++) {
-        await settle(svc.checkNow(seed), time: time);
+      // dns/failed is gone (logs.md «DNS-события»); «Check now» is not offered on dns/down (its buttons: Details, Network event,
+      // DNS settings), so the re-ask is the failover's own timer — driven by the injected clock
+      Future<void> wait(bool Function() cond) async {
+        for (var i = 0; i < 400 && !cond(); i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+          if (i % 20 == 19) await time.advanceSeconds(10);
+        }
       }
-      for (var i = 0; i < 400 && !all().any((e) => e['cat'] == 'dns' && e['type'] == 'failed' && e['id'] != seed); i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 5));
-        if (i % 20 == 19) await time.advanceSeconds(10);
-      }
-      final real = all().where((e) => e['cat'] == 'dns' && e['type'] == 'failed' && e['id'] != seed).toList();
-      expect(real, isNotEmpty, reason: 'a server that misses is judged failed');
-      final id = real.first['id'] as int;
+
+      List<Map> dns(String type) => [for (final e in all()) if (e['cat'] == 'dns' && e['type'] == type) e];
+      // all the candidates: when the spare answers, the silent one is a switch, not a down
+      socks().refuse.add((u) => u.startsWith('dns-check/'));
+      await wait(() => dns('down').isNotEmpty);
+      expect(dns('failed'), isEmpty, reason: 'dns/failed is not written any more');
+      expect(dns('down'), isNotEmpty, reason: 'no server answers: nothing to switch to');
+      final id = dns('down').first['id'] as int;
+      expect(dns('up'), isEmpty);
       socks().refuse.clear();
-      // the flag comes back after failAfter (2) answers in a row (rules.md §6): the first answer alone closes the root only
-      expect(await settle(svc.checkNow(id), time: time), {'ok': true});
-      expect(all().where((e) => e['cat'] == 'dns' && e['type'] == 'switched' && (e['data'] as Map)['reason'] == 'back'), isEmpty,
-          reason: 'one answer is not enough');
-      expect(await settle(svc.checkNow(id), time: time), {'ok': true});
-      expect(recheck(id), containsPair('state', 'ok'));
-      // the DNS pair is dns/switched failover → back (logs.md «По типам»); dns/failed itself has no closer
-      final switched = all().where((e) => e['cat'] == 'dns' && e['type'] == 'switched').toList();
-      final failover = switched.firstWhere((e) => (e['data'] as Map)['reason'] == 'failover');
-      final back = switched.where((e) => (e['data'] as Map)['reason'] == 'back').toList();
-      expect(back, isNotEmpty, reason: 'the server answering again switches the side back');
-      expect(back.last['opens'], failover['id']);
+      await wait(() => dns('up').isNotEmpty);
+      expect(dns('up'), isNotEmpty, reason: 'a server answering again closes the down');
+      expect(dns('up').first['opens'], id);
     });
 
     // the route probes only: the fallback / DNS services of the harness ask on their own meanwhile

@@ -1,0 +1,469 @@
+<!-- raw-html-confirmed -->
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<title>Карточки сбоев «что проверено + причина» — схемы</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--row:#1c2129;--line:#2a313c;--tx:#e6edf3;--mut:#8b949e;--acc:#3b82f6;--accbg:#13233d;--warn:#e3a008;--err:#f05252;--ok:#3fb950;--vio:#a78bfa;--viobg:#2a2342}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,Segoe UI,Roboto,sans-serif;padding:24px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:19px;margin:36px 0 6px;border-top:1px solid var(--line);padding-top:24px}
+p.note{color:var(--mut);margin:4px 0 14px;max-width:1180px}
+.grid{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}
+.col{width:380px}
+.phone{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.ev{padding:14px 14px 14px 12px;display:flex;gap:12px;border-bottom:1px solid var(--line)}
+.ev.warn{border-left:3px solid var(--warn)}.ev.err{border-left:3px solid var(--err)}.ev.okb{border-left:3px solid var(--ok)}
+.ic{width:34px;height:34px;border-radius:9px;background:var(--viobg);color:var(--vio);display:grid;place-items:center;flex:none;font-size:16px}
+.body{flex:1;min-width:0}
+.meta{color:var(--mut);font-size:13px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tag{font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px}
+.tag.w{background:#3a2c08;color:var(--warn)}.tag.e{background:#3d1414;color:var(--err)}
+.ttl{font-size:16px;font-weight:600;margin:3px 0 2px}
+.sub{color:var(--mut);font-size:13.5px}
+.box{background:var(--row);border-radius:10px;margin:10px 0 8px;overflow:hidden}
+.r{display:flex;gap:10px;padding:9px 11px;border-top:1px solid var(--line);align-items:center;font-size:14px}
+.r:first-child{border-top:0}
+.r .k{color:var(--mut);width:64px;flex:none;font-size:13px}
+.r .v{flex:1;min-width:0}.r .v small{display:block;color:var(--mut);font-size:12.5px}
+.r .chev{color:var(--mut)}
+.ev2{padding:14px;border-bottom:1px solid var(--line)}
+.ev2.warn{border-left:3px solid var(--warn)}.ev2.err{border-left:3px solid var(--err)}.ev2.okb{border-left:3px solid var(--ok)}.ev2.info{border-left:3px solid var(--line)}
+.tag.i{background:rgba(139,148,158,.15);color:var(--mut)}.tag.o{background:rgba(63,185,80,.15);color:var(--ok)}
+.ev2.okb .k2{width:46px}
+.sw{display:flex;margin:10px 0 8px;font-size:14px}.sw .c{flex:1;min-width:0;padding:8px 11px;line-height:20px}.sw .v small{display:block;color:var(--mut);font-size:12.5px;line-height:17px}
+.sw .from{background:linear-gradient(270deg,rgb(110,38,40),rgba(110,38,40,.35) 55%,rgba(110,38,40,.12));border-radius:calc(var(--rad) - 4px) 0 0 calc(var(--rad) - 4px);clip-path:polygon(0 0,calc(100% - 14px) 0,100% 50%,calc(100% - 14px) 100%,0 100%);padding-right:22px}
+.sw .to{background:linear-gradient(270deg,rgb(28,92,48),rgba(28,92,48,.35) 55%,rgba(28,92,48,.12));border-radius:0 calc(var(--rad) - 4px) calc(var(--rad) - 4px) 0;clip-path:polygon(0 0,100% 0,100% 100%,0 100%,14px 50%);margin-left:-10px;padding-left:24px}
+.hd{display:flex;gap:10px;align-items:center}.hd .ic{width:28px;height:28px;font-size:14px}
+.ev2 .ttl{margin:8px 0 0}
+.k2{color:var(--mut);font-size:13px;flex:none;width:38px}
+.ai{margin-right:12px}
+.ai{width:26px;height:26px;border-radius:7px;flex:none;background:linear-gradient(135deg,#fff,#d9d4ff)}
+.act{color:#60a5fa}
+.r .chev{width:12px;text-align:center}
+.nd{display:block;font-size:14px;color:var(--tx);position:relative;padding-left:15px;margin-top:2px}
+.nd::before{content:"";position:absolute;left:3px;top:-3px;width:7px;height:11px;border-left:1.5px solid var(--mut);border-bottom:1.5px solid var(--mut);border-bottom-left-radius:3px}
+.r .st,.r .rb{width:22px;flex:none;display:grid;place-items:center}
+.st svg{width:18px;height:18px}.st.x{color:var(--err)}.st.q{color:var(--mut)}
+.r .rb{margin-right:-2px}
+.r{padding:10px 11px}
+.r .chev,.r .go,.r .rb{display:flex;align-items:center;justify-content:center;height:20px}
+.r .chev i,.r .go i,.r .rb i{display:flex}.r .chev svg,.r .go svg,.r .rb svg{display:block}
+.r.sp{padding:0;align-items:stretch;gap:0}
+.main{flex:1;display:flex;gap:10px;align-items:center;padding:10px 11px;min-width:0}
+.main.bad{background:linear-gradient(90deg,rgb(110,38,40),rgba(110,38,40,.45) 45%,rgba(110,38,40,0) 85%)}
+.main.ok{background:linear-gradient(90deg,rgb(28,92,48),rgba(28,92,48,.45) 45%,rgba(28,92,48,0) 85%)}
+/* app themes (design/src/css/00-themes.css): phone = surface, rows = card-hi */
+:root{--err-rgb:240,82,82;--ok-rgb:63,185,80;--acc-rgb:59,130,246;--rad:14px}
+body.th-original{--bg:#0B0F1A;--card:#131929;--row:#1A2035;--line:#252D45;--tx:#D4DEFF;--mut:#7B8EC8;--acc:#4F8EFF;--acc-rgb:79,142,255;--warn:#F0A040;--err:#F05060;--err-rgb:240,80,96;--ok:#00C896;--ok-rgb:0,200,150;--rad:14px}
+body.th-github{--bg:#0D1117;--card:#161B22;--row:#1C2128;--line:#30363D;--tx:#E6EDF3;--mut:#8B949E;--acc:#2F81F7;--acc-rgb:47,129,247;--warn:#D29922;--err:#F85149;--err-rgb:248,81,73;--ok:#3FB950;--ok-rgb:63,185,80;--rad:8px}
+body[class^="th-"] .phone{border-radius:var(--rad)}
+body[class^="th-"] .box{border-radius:calc(var(--rad) - 4px)}
+body[class^="th-"] .b,body[class^="th-"] .rb,body[class^="th-"] .r .chev,body[class^="th-"] .r .go,body[class^="th-"] .act{color:var(--acc)}
+body[class^="th-"] .b{background:rgba(var(--acc-rgb),.15);border-radius:calc(var(--rad) - 6px)}
+body[class^="th-"] .tag.w{background:rgba(210,153,34,.15);color:var(--warn)}
+body[class^="th-"] .ev2.warn{border-left-color:var(--warn)}
+body[class^="th-"] .menu{background:var(--row);border-radius:var(--rad)}
+body[class^="th-"] .menu .mi.lk{color:var(--acc)}
+.r.sp .sep{margin:0}.r.sp .go{height:auto;width:44px}
+.r .v{line-height:20px}.r .v small{line-height:17px}
+.rb i,.go i,.chev i{display:inline-flex}.rb svg,.go svg,.chev svg{width:18px;height:18px;vertical-align:middle}
+.rb{color:#60a5fa}.r .chev,.r .go{color:#60a5fa;width:22px;flex:none;text-align:center}
+.pick{background:#11161d;border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:14px;font-size:13px}
+.pick .pr{display:flex;align-items:center;gap:6px;padding:3px 0}.pick .pr b{width:46px;color:var(--mut);font-weight:600}
+.pick button{background:var(--row);border:1px solid var(--line);color:#c9d1d9;border-radius:7px;width:32px;height:30px;cursor:pointer;display:grid;place-items:center;padding:0}
+.pick button.on{border-color:var(--acc);background:var(--accbg);color:#60a5fa}.pick svg{width:18px;height:18px}
+.rd{display:flex;gap:10px;align-items:center;cursor:pointer}
+.ro{width:18px;height:18px;flex:none;display:block;color:var(--mut)}.ro svg{display:block;width:18px;height:18px}.ro .dot{display:none}
+.rd.on .ro{color:var(--acc)}.rd.on .ro .dot{display:inline}
+.rb{color:#60a5fa;font-size:18px;width:26px;text-align:center;flex:none}
+.sep{width:1px;align-self:stretch;background:var(--line);margin:-9px 0}
+.go{color:var(--mut);width:22px;text-align:center;flex:none;font-size:16px}
+.menu{background:#202733;border:1px solid var(--line);border-radius:10px;margin-top:6px;overflow:hidden;width:290px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.menu .mi{padding:10px 12px;border-top:1px solid var(--line);font-size:14px}.menu .mi:first-child{border-top:0}
+.menu .mi small{display:block;color:var(--mut);font-size:12.5px}
+.menu .mi.lk{color:#60a5fa}
+.mk{font-size:11px;padding:1px 6px;border-radius:4px;background:#24303f;color:#9fb4cc;margin-left:6px;white-space:nowrap}
+.mk.ok{background:#14301c;color:var(--ok)}
+.sec{color:var(--mut);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;padding:8px 11px 4px;background:var(--card)}
+.x{color:var(--err);font-weight:700;width:16px;text-align:center}.q{color:var(--mut);width:16px;text-align:center}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.b{background:var(--accbg);color:#60a5fa;border-radius:8px;padding:6px 12px;font-size:14px}
+.b.p{background:var(--acc);color:#fff}
+.cause{font-size:13.5px;margin-top:6px;color:var(--mut)}.cause b{color:var(--tx)}
+.chain{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;color:#c9d1d9}
+.crit{background:#11161d;border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:13.5px;color:#c9d1d9;margin-top:10px}
+.crit ul{margin:4px 0 0;padding-left:18px}.crit li{margin:2px 0}
+.lbl{font-size:12px;font-weight:700;color:var(--acc);margin:0 0 6px}
+.bad-lbl{color:var(--err)}
+code{background:#1f2630;padding:0 4px;border-radius:4px;font-size:12.5px}
+.nf{color:var(--warn)}
+.shots img{display:block;margin-bottom:8px;border-radius:8px}
+.ba{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start;margin:0 0 18px}
+.ba>.full{grid-column:1/-1}
+.ba>div{min-width:0}
+.ba .phone{width:auto;max-width:380px}
+.ba .none{color:var(--mut);font-size:13px;padding:10px;border:1px dashed rgba(255,255,255,.18);border-radius:8px}
+.ba img{max-width:100%;height:auto}
+</style></head><body>
+
+<h1>Карточки сбоев: «что проверено + причина»</h1>
+<p class="note">Шесть событий в виде согласованной карточки <code>site/unreachable</code>: иконка в строке времени, блок данных во всю ширину, узкие подписи, «подписка · протокол» + «└ нода», проверки подсвечены градиентом (красный / зелёный) без значков, строка Cause, <b>Details ▾ всегда первая</b>. Тап по телу карточки ничего не открывает. Тексты UI — на английском, пояснения — на русском. Данные придуманы, но поля — настоящие (<code>event_text.dart</code>, <code>logs.md</code>). Пометка <span class="nf">«нужно новое поле»</span> — данных в событии сейчас нет.</p>
+<div class="pick" id="pick" style="max-width:380px"></div>
+
+<!-- ============ 1. site/blocked ============ -->
+<p class="note"><code>site/blocked</code> перенесён в <code>dns_site_schemes.html</code> (§2 и сравнение с unreachable — §4).</p>
+<h2>2. <code>conn/connectFailed</code> — не удалось подключиться</h2>
+<p class="note">Сейчас: заголовок «Could not connect» и одна строка <code>reason</code> (готовый английский текст). Кнопки по <code>fix</code>: <code>pick</code> → Choose server, <code>settings</code> → Open settings; Retry всегда. ERROR. Что проверено, из события не видно.</p>
+<div class="ba">
+<div class="shots">
+<div class="lbl bad-lbl">СЕЙЧАС (conn_4: pinLost)</div>
+<img src="../app/build/event_shots/conn_4.png" style="width:380px">
+</div>
+<div>
+<div class="lbl">НОВОЕ A — <code>fix: pick</code>, закреплённый сервер пропал</div>
+<div class="phone">
+ <div class="ev2 err">
+  <div class="hd"><div class="ic">📶</div><div class="meta">02:58 <span class="tag e">ERROR</span> ×3 · auto-connect</div></div>
+  <div class="ttl">Could not connect — picked server is gone</div>
+  <div class="box">
+   <div class="r"><span class="k2">Mode</span><span class="v">TUN · Manual pick</span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">Pick</span><span class="v">Remnawave · REALITY<span class="nd">Frankfurt 1</span></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="sec">Checked</div>
+   <div class="r sp"><div class="main bad"><span class="v">Pick is in the subscription<span class="nd">Remnawave no longer lists it (updated 02:41)</span></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
+  </div>
+  <div class="cause">Cause: <b>the subscription removed Frankfurt 1</b> — the tunnel is not moved to another server</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">Choose server</span><span class="b">Retry</span></div>
+ </div>
+</div>
+</div>
+</div>
+<div class="ba">
+<div></div>
+<div>
+<div class="lbl">НОВОЕ B — <code>fix: settings</code> (порт занят)</div>
+<div class="phone">
+ <div class="ev2 err">
+  <div class="hd"><div class="ic">📶</div><div class="meta">02:58 <span class="tag e">ERROR</span></div></div>
+  <div class="ttl">Could not connect — sing-box did not start</div>
+  <div class="box">
+   <div class="r"><span class="k2">Mode</span><span class="v">System proxy</span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">Entry</span><span class="v">Remnawave · REALITY<span class="nd">Frankfurt 1</span></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="sec">Checked</div>
+   <div class="r sp"><div class="main bad"><span class="v">Local port 7890<span class="nd">address already in use</span></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
+  </div>
+  <div class="cause">Cause: <b>Settings → Connection</b> — another program holds the port</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">Open settings</span><span class="b">Retry</span></div>
+ </div>
+</div>
+</div>
+</div>
+<div class="ba">
+<div><div class="crit" style="margin-top:0"><div class="lbl">Предложения</div><ul>
+ <li><b>Reason разбирается на структуру</b>: ряды Mode / Pick (или Entry) + блок Checked с одним красным рядом «что именно не прошло». Сейчас пользователь читает длинную фразу; в карточке — заголовок (итог), ряд (где), Cause (почему).</li>
+ <li><b>Ряд Pick/Entry с нодой «└»</b> — тап ведёт в Routes к ноде (для пропавшей — к подписке). Тот же вид «подписка · протокол».</li>
+ <li><b>Кнопки по <code>fix</code>, но Details ▾ первая:</b> pick → Choose server, settings → Open settings, затем Retry. Тап по карточке ничего не делает.</li>
+ <li><b>Красный ряд без значка</b>, как проверки в site/unreachable. Зелёных нет — подключение не удалось; нечего показывать «открылось».</li>
+ <li><b>Заголовок короткий и называет итог:</b> «picked server is gone» / «sing-box did not start» / просто «Could not connect». Для старых событий без <code>stage</code> — как сейчас.</li>
+ <li><span class="nf">нужно новое поле:</span> <code>stage</code> (<code>pick</code> / <code>start</code> / <code>handshake</code> / <code>permission</code>) — выбрать заголовок и красный ряд; <code>node</code> (ключ <code>sid::nid</code>) для ряда Pick/Entry; <code>setting</code> (какая настройка — «Local port 7890») при <code>fix: settings</code>; <code>detail</code> — слова sing-box отдельно от <code>reason</code>. Без них — одна строка <code>reason</code> в красном ряду.</li>
+ <li><b>Дубли:</b> ×N (автоподключение) — счётчик в шапке, карточка одна, как сейчас.</li>
+</ul></div></div>
+<div>
+<div class="lbl">НОВОЕ C — причина не известна (<code>fix</code> нет)</div>
+<div class="phone">
+ <div class="ev2 err">
+  <div class="hd"><div class="ic">📶</div><div class="meta">02:58 <span class="tag e">ERROR</span></div></div>
+  <div class="ttl">Could not connect</div>
+  <div class="box">
+   <div class="r"><span class="k2">Entry</span><span class="v">Remnawave · REALITY<span class="nd">Frankfurt 1</span></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="v" style="color:var(--mut)">sing-box: <i>“timeout waiting for the interface”</i></span></div>
+  </div>
+  <div class="cause">Cause: <b>not established</b> — see the sing-box words above</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">Retry</span></div>
+ </div>
+</div>
+</div>
+</div>
+
+<!-- ============ 3. conn/lost ============ -->
+<h2>3. <code>conn/lost</code> — нет связи через VPN (только старый журнал)</h2>
+<p class="note">Событие больше не пишется (решение 2026-10-18: его место заняли <code>routes</code> у <code>conn/vpnDown</code>); в старом журнале оно рисуется как раньше. Поля: <code>{routes}</code> + поля Sentinel (<code>verdict: confirmed</code> / не подтверждена). Кнопки: Check now (пока подключено), Open. Схема — чтобы старые записи не выбивались из ленты.</p>
+<div class="ba">
+<div class="shots">
+<div class="lbl bad-lbl">СЕЙЧАС (conn_1)</div>
+<img src="../app/build/event_shots/conn_1.png" style="width:380px">
+</div>
+<div>
+<div class="lbl">НОВОЕ — старая запись в общем виде</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">📶</div><div class="meta">02:58 <span class="tag w">WARN</span></div></div>
+  <div class="ttl">No connection through the VPN</div>
+  <div class="box">
+   <div class="r"><span class="k2">Route</span><span class="v">Remnawave · REALITY<span class="nd">Frankfurt 1</span></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="sec">Checked</div>
+   <div class="r sp"><div class="main bad"><span class="rb"><i data-k="retry"></i></span><span class="v">Routes through the VPN<span class="nd">none of 3 answers</span></span></div></div>
+   <div class="r sp"><div class="main ok"><span class="rb"><i data-k="retry"></i></span><span class="v">Internet without the VPN<span class="nd">answers directly</span></span></div></div>
+  </div>
+  <div class="cause">Cause: <b>no route answers</b> — the internet itself is fine</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">Check now</span></div>
+ </div>
+</div>
+</div>
+</div>
+<div class="ba">
+<div><div class="crit" style="margin-top:0"><div class="lbl">Предложения</div><ul>
+ <li><b>Только оформление для старого журнала</b>, без новой логики: событие не пишется, тратить данные на него не нужно.</li>
+ <li><b>Checked из того, что есть:</b> красный ряд «Routes through the VPN · none of N answers» из <code>routes</code> и, если вердикт есть, зелёный «Internet without the VPN · answers directly»; иначе серый текст «not confirmed» (без градиента). Подсветка ряда = итог, значков нет.</li>
+ <li><b>↻ слева у ряда Checked — и есть «Check now»</b> (перепроверка того же, пока идёт — «Checking…» неактивна). Кнопка Check now остаётся для совместимости, но можно убрать, как «Check again» в site-карточке: тап по ряду делает то же. Вопрос ниже.</li>
+ <li><b>Кнопка Open заменяется рядом Route:</b> › ведёт в Nodes к карточке route (подписка / запись), как Open сейчас.</li>
+ <li><b>Cause:</b> «no route answers — the internet itself is fine» (подтверждено) или «not established — the network may be down».</li>
+ <li><b>Ряд Route — только если в старой записи есть запись маршрута.</b> <span class="nf">нужно новое поле</span> нет и не будет: старые события не дополняем; ряда нет, когда данных нет.</li>
+ <li><b>Пара conn/restored</b> остаётся как есть («Connection restored · break of 2m 10s», зелёная OK-карточка в том же стиле).</li>
+</ul></div></div>
+<div>
+<div class="lbl">ТО ЖЕ — интернет не подтверждён (<code>verdict</code> не confirmed)</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">📶</div><div class="meta">02:58 <span class="tag w">WARN</span></div></div>
+  <div class="ttl">No connection through the VPN</div>
+  <div class="box">
+   <div class="sec">Checked</div>
+   <div class="r sp"><div class="main bad"><span class="rb"><i data-k="retry"></i></span><span class="v">Routes through the VPN<span class="nd">none of 3 answers</span></span></div></div>
+   <div class="r"><span class="v" style="color:var(--mut)">Internet availability is not confirmed</span></div>
+  </div>
+  <div class="cause">Cause: <b>not established</b> — the network may be down</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">Check now</span></div>
+ </div>
+</div>
+</div>
+</div>
+
+<!-- ============ 4. conn/failing ============ -->
+<h2>4. <code>conn/failing</code> — соединения приложения не удаются</h2>
+<p class="note">Сейчас: заголовок «org.telegram.messenger: connections are not established», внизу одна строка «api.telegram.org:443 and 2 more · No answer in time · Failures: 7 in 60 s · Through Remnawave». Имя пакета вместо названия приложения, нет иконки, правила, ноды. Поля: <code>host / port / more</code>, <code>kind</code>, <code>count / windowMs</code>, <code>route / outbound</code>, приложение. Пишется, когда проба сайта прошла (не вина сайта) или причина не ясна.</p>
+<div class="ba">
+<div class="shots">
+<div class="lbl bad-lbl">СЕЙЧАС (site_14)</div>
+<img src="../app/build/event_shots/site_14.png" style="width:380px">
+</div>
+<div>
+<div class="lbl">НОВОЕ — проба сайта прошла</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">🔌</div><div class="meta">02:58 <span class="tag w">WARN</span> ×2</div></div>
+  <div class="ttl">Telegram: 7 connections failed in 60 s</div>
+  <div class="box">
+   <div class="r"><img class="ai" alt=""><span class="v">Telegram<small>no own route</small></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">Rule</span><span class="v act">Create api.telegram.org rule</span><span class="chev ad"><i data-k="add"></i></span></div>
+   <div class="r"><span class="k2">Route</span><span class="v">Remnawave · REALITY<span class="nd">Frankfurt 1</span></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">To</span><span class="v">api.telegram.org:443<small>and 2 more · no answer in time</small></span></div>
+   <div class="sec">Checked</div>
+   <div class="r sp"><div class="main ok"><span class="rb"><i data-k="retry"></i></span><span class="v">api.telegram.org · HTTPS<span class="nd">opens in 380 ms · same server</span></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
+  </div>
+  <div class="cause">Cause: <b>the app’s connections</b> — the server and the site answer to a probe</div>
+  <div class="btns"><span class="b">Details ▾</span></div>
+ </div>
+</div>
+</div>
+</div>
+<div class="ba">
+<div><div class="crit" style="margin-top:0"><div class="lbl">Предложения</div><ul>
+ <li><b>Название и иконка приложения вместо пакета</b> (<code>appName</code> уже умеет), без подписи «App»: как первый ряд site-карточки; › — лист приложения. «no own route» малым, если своего маршрута нет.</li>
+ <li><b>Заголовок — число и окно:</b> «Telegram: 7 connections failed in 60 s» (<code>count / windowMs</code>); тип отказа («no answer in time») малым под адресом — ряд «To» вместо склейки через «·».</li>
+ <li><b>Rule — как в unreachable:</b> «Create api.telegram.org rule» или «Telegram rule / Proxy: …». Раньше кнопка Create rule была снизу — переносим в ряд, форма с Fallback = Default (маршрут, открывший сайт, неизвестен — это не <code>blocked</code>).</li>
+ <li><b>Route — реальный <code>route / outbound</code></b> в виде «подписка · протокол / └ нода»; Direct / Block — одной строкой «Direct».</li>
+ <li><b>Checked — результат пробы сайта</b> (зелёный: сайт открылся, значит, виноват не он). Если пробы не было — блока нет, Cause «not established». Причина зелёная проверка + красный итог — напротив: Cause отдельно объясняет, что неудачи — у самого приложения.</li>
+ <li><b>Кнопки:</b> только Details ▾ (Why / Raw). Create rule — в ряду Rule, Open — тап по приложению. «Ignore site ▾» не добавляем: событие про приложение, а не про адрес. <i>Вопрос — нужна ли здесь Ignore для адреса?</i></li>
+ <li><span class="nf">нужно новое поле:</span> <code>probe</code> (<code>ok</code>, <code>ms</code>, через какую ноду) — результат пробы, сейчас только неявно в <code>why</code>; для зелёного ряда. Без него — один серый ряд «site probe passed».</li>
+</ul></div></div>
+<div>
+<div class="lbl">ТО ЖЕ — правило есть, проба не проходила (причина не ясна)</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">🔌</div><div class="meta">02:58 <span class="tag w">WARN</span></div></div>
+  <div class="ttl">Telegram: 7 connections failed in 60 s</div>
+  <div class="box">
+   <div class="r"><img class="ai" alt=""><span class="v">Telegram</span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">Rule</span><span class="v">Telegram rule<small>Proxy: Remnawave · Frankfurt 1</small></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">Route</span><span class="v">Remnawave · REALITY<span class="nd">Frankfurt 1</span></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">To</span><span class="v">api.telegram.org:443<small>and 2 more · refused by the far side</small></span></div>
+  </div>
+  <div class="cause">Cause: <b>not established</b> — the site was not probed</div>
+  <div class="btns"><span class="b">Details ▾</span></div>
+ </div>
+</div>
+</div>
+</div>
+
+<!-- ============ 5. node/lost ============ -->
+<h2>5. <code>node/lost</code> — вы выключили или удалили используемые серверы</h2>
+<p class="note">Сейчас (sub_11): свёрнутая строка «You switched off servers in use: Warsaw / Their traffic uses If unavailable until you switch them on» и в раскрытой — карточки «App · Telegram → Backup VPN»; Raw с Action / Subscription / Nodes / Servers. Это не сбой «чего-то проверили», а <b>последствия вашего действия</b>: вместо Checked — блок «Affected» (что задето и куда идёт трафик теперь). Поля: <code>action (off|deleted)</code>, <code>source / name</code>, <code>nodes</code>, <code>nodeIds</code>, <code>nodeCount</code>, <code>affected</code>.</p>
+<div class="ba">
+<div class="shots">
+<div class="lbl bad-lbl">СЕЙЧАС (sub_11)</div>
+<img src="../app/build/event_shots/sub_11.png" style="width:380px">
+<div class="lbl" style="margin-top:14px">СТАРАЯ СХЕМА (node_lost_scheme.html)</div>
+<div class="phone"><div class="ev2 warn" style="font-size:13px">
+ <div class="meta">15:10 · warn · you</div>
+ <div class="ttl" style="margin:2px 0">You switched off servers in use: NL-1</div>
+ <div class="sub">Their traffic uses If unavailable until you switch them on.</div>
+ <div class="box"><div class="r"><span class="k">Rule</span><span class="v">Streaming</span><span class="chev">→ Direct ›</span></div></div>
+ <div class="btns"><span class="b p">Choose for all</span><span class="b">Switch on</span></div>
+</div></div>
+</div>
+<div>
+<div class="lbl">НОВОЕ — <code>action: off</code> (серверов два)</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">👤</div><div class="meta">14:12 <span class="tag w">WARN</span> · you</div></div>
+  <div class="ttl">You switched off 2 servers in use</div>
+  <div class="box">
+   <div class="r"><span class="k2">Source</span><span class="v">Backup VPN · WG<span class="nd">Warsaw</span><span class="nd">Prague</span></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="sec">Affected — uses If unavailable now</div>
+   <div class="r"><img class="ai" alt=""><span class="v">Telegram<small>→ Main flow</small></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">Rule</span><span class="v">Streaming<small>→ Direct</small></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">Route</span><span class="v">Main flow (Auto)<small>→ Remnawave · Frankfurt 1</small></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r sp"><div class="main bad"><span class="k2">Chain</span><span class="v">Remnawave via Backup<small>→ not working</small></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
+  </div>
+  <div class="cause">Cause: <b>you</b> switched them off in Nodes — their traffic uses If unavailable until you switch them on</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">Switch on</span><span class="b">Choose for all</span></div>
+ </div>
+ <div class="ev2 okb">
+  <div class="hd"><div class="ic">👤</div><div class="meta">14:58 <span class="tag o">OK</span> · you</div></div>
+  <div class="ttl">You switched on 2 servers in use</div>
+  <div class="box">
+   <div class="r"><span class="k2">Source</span><span class="v">Backup VPN · WG<span class="nd">Warsaw</span><span class="nd">Prague</span></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r sp"><div class="main ok"><span class="v">Traffic of 1 chain, 1 rule, 1 app, the route goes through them again</span></div></div>
+  </div>
+  <div class="btns"><span class="b">Details ▾</span></div>
+ </div>
+</div>
+</div>
+</div>
+<div class="ba">
+<div><div class="crit" style="margin-top:0"><div class="lbl">Предложения</div><ul>
+ <li><b>Сохранено из старой схемы:</b> смысл (только если задет используемый сервер; свободные — без события), ряды задетого «что → куда идёт сейчас», тап по ряду — настройка этого элемента, <b>Switch on</b> при off (пара node/back), <b>Choose for all</b> — только если задето больше одного, пара «lost → back», у deleted пары нет и текст без «goes back by itself», без системного уведомления (только лента), метка «you».</li>
+ <li><b>Привести к общему виду:</b> иконка в строке времени, блок во всю ширину, узкие подписи (Source / Rule / Route / Chain), «└ нода» для имён серверов; тексты строки «Affected» остались.</li>
+ <li><b>Единственное «красное»:</b> цепочка, которая перестала работать («→ not working») — красный ряд, остальные задетые — без подсветки: трафик идёт по If unavailable, это штатно, а не сбой. Тревожный цвет — только там, где ничего не работает.</li>
+ <li><b>Заголовок короче:</b> «You switched off 2 servers in use» (имена в ряду Source, а не в заголовке — они длинные). Для одного — «You switched off Warsaw».</li>
+ <li><b>Cause — это вы:</b> «you switched them off in Nodes». Строки «Checked» нет — проверять нечего; вместо неё «Affected».</li>
+ <li><b>Кнопки:</b> Details ▾ первая, затем Switch on (off), затем Choose for all. Раньше «Choose for all» шла первой — теперь действие, возвращающее как было, важнее выбора заново.</li>
+ <li><b>Цели задетого:</b> при «Choose for all» окно выбора — то же, что «Send through» у правила. Откат (Switch on) — в карточку «OK» через пару node/back.</li>
+ <li><span class="nf">нужно новое поле:</span> нет — <code>affected</code> уже даёт тип (маршрут / правило / приложение / цепочка), имя и куда идёт сейчас; <code>nodes</code> ≤ 10 для ряда Source (≥ 11 — «and N more»).</li>
+ <li><b>rules/targetLost</b> от этого же действия уходят внутрь («+N related»), без отдельных строк — как в <code>logs.md</code>.</li>
+</ul></div></div>
+<div>
+<div class="lbl">ТО ЖЕ — <code>action: deleted</code> (пары нет)</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">👤</div><div class="meta">02:54 <span class="tag w">WARN</span> · you</div></div>
+  <div class="ttl">You deleted Warsaw</div>
+  <div class="box">
+   <div class="r"><span class="k2">Source</span><span class="v">Backup VPN · WG<span class="nd">Warsaw — deleted</span></span></div>
+   <div class="sec">Affected</div>
+   <div class="r sp"><div class="main bad"><span class="k2">Chain</span><span class="v">Remnawave via Backup<small>→ not working</small></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
+   <div class="r"><img class="ai" alt=""><span class="v">Telegram<small>→ Main flow</small></span><span class="chev"><i data-k="go"></i></span></div>
+  </div>
+  <div class="cause">Cause: <b>you</b> deleted the server — nothing to switch back on</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">Choose for all</span></div>
+ </div>
+</div>
+</div>
+</div>
+
+<!-- ============ 6. rules/targetLost ============ -->
+<h2>6. <code>rules/targetLost</code> — цель правила недоступна</h2>
+<p class="note">Сейчас: «Target deleted chain is unavailable» + «Target deleted. Rule Streaming and 1 more is blocked»; в развёрнутом виде Raw-таблица (Rule / Target / Reason / To / More rules and apps). Кнопки Open rule и Choose target. Тип цели в заголовке путается с названием («deleted chain» — это тип, а не название). Поля: <code>rule</code>, <code>target</code>, <code>why</code>, <code>to</code> (Block / Direct / main flow), <code>more</code>.</p>
+<div class="ba">
+<div class="shots">
+<div class="lbl bad-lbl">СЕЙЧАС (rules_1)</div>
+<img src="../app/build/event_shots/rules_1.png" style="width:380px">
+</div>
+<div>
+<div class="lbl">НОВОЕ — цель удалена, трафик блокируется</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">⑂</div><div class="meta">02:58 <span class="tag w">WARN</span></div></div>
+  <div class="ttl">Target “Double NL” is unavailable</div>
+  <div class="box">
+   <div class="r"><span class="k2">Rule</span><span class="v">Streaming<small>Proxy: Double NL (chain)</small></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">More</span><span class="v">1 more rule or app<small>Telegram app</small></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="sec">Checked</div>
+   <div class="r sp"><div class="main bad"><span class="v">Double NL · chain<span class="nd">deleted</span></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">Now</span><span class="v">If unavailable: Block<small>traffic of the rules is blocked</small></span><span class="chev"><i data-k="go"></i></span></div>
+  </div>
+  <div class="cause">Cause: <b>target deleted</b> — traffic of 2 rules is blocked</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">Open rule</span><span class="b">Choose target</span></div>
+ </div>
+</div>
+</div>
+</div>
+<div class="ba">
+<div><div class="crit" style="margin-top:0"><div class="lbl">Предложения</div><ul>
+ <li><b>Заголовок называет цель по имени, тип — в ряду:</b> «Target “Double NL” is unavailable», тип («chain», «subscription», «server») малым в красном ряду. Сейчас «deleted chain» читается как название.</li>
+ <li><b>Причина (<code>why</code>) уходит в красный ряд и Cause:</b> «deleted», «switched off», «no servers», «not supported» — одной строкой в Cause, без точек-склеек «Target deleted. Rule … is blocked».</li>
+ <li><b>«Now» — куда идёт трафик (If unavailable):</b> Block / Direct / main flow одной строкой. Сейчас «is blocked» спрятано в хвосте предложения. Блокировка — самый важный факт, красим ряд Now красным при Block.</li>
+ <li><b>Ряды Rule и «1 more rule or app»</b> вместо «Streaming and 1 more»: Rule — первое задетое, More — число (тап раскрывает список правил и приложений); при ≤ 3 — отдельными рядами, ≥ 4 — «N more» (как в карточках per-app правил).</li>
+ <li><b>Кнопки:</b> Details ▾ первая, Open rule (тап — правило / приложение), Choose target (окно «Send through»). Раньше Details не было — Raw открывался тапом по карточке.</li>
+ <li><b>Под node/lost / sub/updated:</b> если сбой вызван вашим действием или обновлением подписки, targetLost сворачивается внутрь корня («+N related»); эта карточка — для случая, когда корня нет (цель удалена в правилах).</li>
+ <li><b>Пара targetFound:</b> та же карточка в OK-варианте («Target “Double NL” is available again»), ряд Checked зелёный.</li>
+ <li><span class="nf">нужно новое поле:</span> <code>targetKind</code> (<code>chain</code> / <code>sub</code> / <code>node</code> / <code>entry</code>) и <code>nodeKey</code> для ряда с «└ нода» — сейчас тип зашит в текст <code>target(d['target'])</code>; <code>more</code> уже есть как число, но без имён (<code>moreNames</code> ≤ 3 — для рядов).</li>
+</ul></div></div>
+<div>
+<div class="lbl">ТО ЖЕ — нет серверов (подписка, трафик идёт напрямую)</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">⑂</div><div class="meta">11:30 <span class="tag w">WARN</span></div></div>
+  <div class="ttl">Target “Backup VPN” is unavailable</div>
+  <div class="box">
+   <div class="r"><span class="k2">Rule</span><span class="v">Banking<small>Proxy: Backup VPN</small></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="sec">Checked</div>
+   <div class="r sp"><div class="main bad"><span class="v">Backup VPN · subscription<span class="nd">no servers left</span></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">Now</span><span class="v">If unavailable: Direct</span><span class="chev"><i data-k="go"></i></span></div>
+  </div>
+  <div class="cause">Cause: <b>the update removed all servers</b> — traffic goes direct until they return</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">Open rule</span><span class="b">Choose target</span></div>
+ </div>
+</div>
+</div>
+</div>
+
+<h2 style="font-size:16px">Открытые вопросы</h2>
+<div class="crit" style="max-width:1180px"><ul>
+ <li><b>conn/lost:</b> убрать кнопку Check now (↻ в ряду Checked делает то же) или оставить для старого журнала как есть?</li>
+ <li><b>conn/failing:</b> нужна ли «Ignore site ▾» для адреса или достаточно Details ▾?</li>
+ <li><b>conn/connectFailed:</b> заводим <code>stage</code> и <code>setting</code> в событие (без них карточка — одна красная строка с reason)?</li>
+ <li><b>node/lost:</b> «Switch on» — перед «Choose for all» или как раньше после?</li>
+</ul></div>
+
+<script>
+const I={
+'refresh-cw':'<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+'rotate-cw':'<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
+'refresh-ccw':'<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/>',
+'redo-2':'<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/>',
+'repeat-2':'<path d="m2 9 3-3 3 3"/><path d="M13 18H7a2 2 0 0 1-2-2V6"/><path d="m22 15-3 3-3-3"/><path d="M11 6h6a2 2 0 0 1 2 2v10"/>',
+'x':'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+'circle-help':'<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+'plus':'<path d="M5 12h14"/><path d="M12 5v14"/>',
+'circle-plus':'<circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/>',
+'square-plus':'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M8 12h8"/><path d="M12 8v8"/>',
+'list-plus':'<path d="M16 5H3"/><path d="M11 12H3"/><path d="M16 19H3"/><path d="M18 9v6"/><path d="M21 12h-6"/>',
+'chevron-right':'<path d="m9 18 6-6-6-6"/>',
+'chevrons-right':'<path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/>',
+'arrow-right':'<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+'square-arrow-out-up-right':'<path d="M21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"/><path d="m21 3-9 9"/><path d="M15 3h6v6"/>',
+'locate-fixed':'<line x1="2" x2="5" y1="12" y2="12"/><line x1="19" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="5"/><line x1="12" x2="12" y1="19" y2="22"/><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/>',
+'crosshair':'<circle cx="12" cy="12" r="10"/><line x1="22" x2="18" y1="12" y2="12"/><line x1="6" x2="2" y1="12" y2="12"/><line x1="12" x2="12" y1="6" y2="2"/><line x1="12" x2="12" y1="22" y2="18"/>',
+'map-pin':'<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>'};
+const svg=n=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${I[n]}</svg>`;
+const G={retry:['refresh-cw','rotate-cw','refresh-ccw','redo-2','repeat-2'],add:['plus','circle-plus','square-plus','list-plus'],go:['chevron-right','chevrons-right','arrow-right','square-arrow-out-up-right','locate-fixed','crosshair','map-pin']};
+const L={retry:'Retry',add:'Add',go:'Go'};const cur={x:'x',q:'circle-help',retry:'repeat-2',add:'square-plus',go:'square-arrow-out-up-right'};
+const pick=document.getElementById('pick');
+function draw(){document.querySelectorAll('i[data-k]').forEach(e=>e.innerHTML=svg(cur[e.dataset.k]));
+ pick.innerHTML=`<div class="pr"><b>Theme</b>${['original','github'].map(t=>`<button style="width:auto;padding:0 10px" data-th="${t}" class="${document.body.className=='th-'+t?'on':''}">${t}</button>`).join('')}</div>`+'<div style="color:var(--mut);margin:6px 0 4px">Иконки Lucide — нажми, чтобы примерить:</div>'+Object.keys(G).map(k=>`<div class="pr"><b>${L[k]}</b>${G[k].map(n=>`<button title="${n}" data-k="${k}" data-n="${n}" class="${cur[k]==n?'on':''}">${svg(n)}</button>`).join('')}</div>`).join('');}
+pick.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.th)document.body.className='th-'+b.dataset.th;else cur[b.dataset.k]=b.dataset.n;draw();});
+document.body.className='th-github';
+document.querySelectorAll(".ro").forEach(e=>e.innerHTML=`<svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="8" fill="none" stroke="currentColor" stroke-width="2"/><circle class="dot" cx="9" cy="9" r="4" fill="currentColor"/></svg>`);
+draw();
+</script>
+</body></html>

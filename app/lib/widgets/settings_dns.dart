@@ -29,23 +29,10 @@ import 'settings_parts.dart';
 Future<void> showDnsSheet(BuildContext context, {String? focus}) =>
     showAppSheet<void>(context, builder: (_) => DnsSheet(focus: focus));
 
-String dnsKindLabel(AppLocalizations l10n, String addr) =>
-    switch (dnsKind(addr)) {
-      'system' => l10n.system,
-      'doh' => 'DoH',
-      'dot' => 'DoT',
-      'doq' => 'DoQ',
-      'tcp' => 'TCP',
-      _ => 'UDP',
-    };
-
-/// Short protocol label of a race kind (`doh` -> DoH).
-String dnsKindName(String kind) => switch (kind) {
-  'doh' => 'DoH',
-  'dot' => 'DoT',
-  'doq' => 'DoQ',
-  _ => 'UDP',
-};
+String dnsKindLabel(AppLocalizations l10n, String addr) {
+  final k = dnsKind(addr);
+  return k == 'system' ? l10n.system : dnsKindName(k);
+}
 
 /// The polls a provider's ping may take (one per second): a dead transport costs the core ~10 s and more per
 /// check name, so a full ping of a provider with several of them is long.

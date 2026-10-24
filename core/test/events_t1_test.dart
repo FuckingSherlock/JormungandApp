@@ -110,8 +110,12 @@ void main() {
       }
       expect(eventNotifKind['core/stateLost'], 'appData');
       expect(eventNotifKind['core/stateRestored'], 'appData');
-      expect(eventNotifKind['dns/failed'], 'dnsFailed');
-      expect(eventNotifKind.containsKey('dns/failedOnNode'), isFalse, reason: 'a consequence: the journal only');
+      expect(eventNotifKind['dns/down'], 'dnsFailed', reason: 'dns/down takes over the switch of dns/failed');
+      expect(eventNotifKind.containsKey('dns/failed'), isFalse, reason: 'no longer written');
+      expect(eventNotifKind.containsKey('dns/failedOnNode'), isFalse, reason: 'no longer written');
+      expect(eventNotifKind['dns/up'], 'dnsFailed', reason: 'the pair is one notification changing in place, like conn/vpnUp');
+      expect(eventNotifKind['dns/switched'], 'autoSwitch');
+      expect(eventNotifKind.containsKey('dns/transport'), isFalse, reason: 'a transport change of the same server does not notify');
       expect(eventNotifKind.containsKey('net/switched'), isFalse);
     });
 
@@ -141,14 +145,16 @@ void main() {
       expect(notifDefaults['appData'], isTrue);
       expect(notifDefaults['dnsFailed'], isTrue);
       expect(eventNotifies(null, ev('core', 'stateLost', level: 'warn')), isTrue);
-      expect(eventNotifies(null, ev('dns', 'failed', level: 'warn')), isTrue);
+      expect(eventNotifies(null, ev('dns', 'down', level: 'error')), isTrue);
+      expect(eventNotifies(null, ev('dns', 'up')), isTrue, reason: 'the closing line changes the dns/down notification in place');
+      expect(eventNotifies({'dnsFailed': false}, ev('dns', 'up')), isFalse);
     });
 
     test('the toggles of the new kinds and the master switch decide', () {
       expect(eventNotifies({'appData': false}, ev('core', 'stateLost', level: 'warn')), isFalse);
-      expect(eventNotifies({'dnsFailed': false}, ev('dns', 'failed', level: 'warn')), isFalse);
+      expect(eventNotifies({'dnsFailed': false}, ev('dns', 'down', level: 'error')), isFalse);
       expect(eventNotifies({'dnsFailed': false}, ev('core', 'stateLost', level: 'warn')), isTrue, reason: 'another kind');
-      expect(eventNotifies({'enabled': false}, ev('dns', 'failed', level: 'warn')), isFalse);
+      expect(eventNotifies({'enabled': false}, ev('dns', 'down', level: 'error')), isFalse);
     });
 
     test('conn/disconnected notifies only by: error', () {

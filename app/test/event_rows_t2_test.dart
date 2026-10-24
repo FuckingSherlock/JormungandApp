@@ -480,7 +480,7 @@ void main() {
       final links = AppLinks(
         openRuleForm: (id) => calls.add('rule:$id'),
         openAppAct: (pkg) => calls.add('app:$pkg'),
-        openRoute: ({bool edit = false}) => calls.add('route'),
+        openRoute: ({bool edit = false, String? node}) => calls.add('route'),
       );
       final items = [
         _item('rule', 'r1', 'Netflix', 'block'),

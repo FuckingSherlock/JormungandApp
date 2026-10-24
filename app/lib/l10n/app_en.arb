@@ -3474,7 +3474,6 @@
   "saveAs": "Save as…",
   "theFolderYouSavedToBefore": "The folder you saved to before is gone or no longer allowed. Choose another one.",
   "theFolderYouSavedToBefore2": "The folder you saved to before is gone. Pick where to save the file.",
-  "dnsServerDoesNotAnswerOn": "DNS server does not answer on this node",
   "doesNotAnswerThroughItAnswers": "Does not answer through {s0}; it answers through {s1}",
   "@doesNotAnswerThroughItAnswers": {
     "placeholders": {
@@ -3979,28 +3978,6 @@
         "type": "String"
       },
       "s3": {
-        "type": "String"
-      }
-    }
-  },
-  "dnsServerDoesNotAnswer2": "DNS server {s0} does not answer",
-  "@dnsServerDoesNotAnswer2": {
-    "placeholders": {
-      "s0": {
-        "type": "String"
-      }
-    }
-  },
-  "dnsServerDoesNotAnswerThrough": "DNS server {s0} does not answer through {s1} — works through the spare node {s2}",
-  "@dnsServerDoesNotAnswerThrough": {
-    "placeholders": {
-      "s0": {
-        "type": "String"
-      },
-      "s1": {
-        "type": "String"
-      },
-      "s2": {
         "type": "String"
       }
     }
@@ -4692,5 +4669,165 @@
         "type": "String"
       }
     }
-  }
+  },
+  "dnsSwitched": "DNS switched",
+  "changedTransport": "{s0} changed transport",
+  "@changedTransport": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "dnsDoesNotAnswer": "DNS does not answer",
+  "dnsAnswersAgainAfter": "DNS answers again — after {s0}",
+  "@dnsAnswersAgainAfter": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "dnsAnswersAgain": "DNS answers again",
+  "noAnswerForS": "no answer for {n0} s",
+  "@noAnswerForS": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "noAnswerStaysSelected": "no answer · stays selected",
+  "noAnswerNoSpareDnsOn": "no answer · no spare DNS on this side",
+  "checkedThrough": "Checked through",
+  "throughVpn": "Through VPN",
+  "answersSpareNode": "answers — spare node",
+  "itself": "{s0} itself",
+  "@itself": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "answersThroughTheSameRoute": "{s0} answers through the same route",
+  "@answersThroughTheSameRoute": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "doesNotAnswerOnThisRoute": "{s0} does not answer on this route",
+  "@doesNotAnswerOnThisRoute": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "ofTheSameServerDoes": "{s0} of the same server does",
+  "@ofTheSameServerDoes": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "node": "node {s0}",
+  "@node": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "answersThroughAnotherNode": "{s0} answers through another node",
+  "@answersThroughAnotherNode": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "dnsSettings": "DNS settings",
+  "networkEvent": "Network event",
+  "details": "Details ▾",
+  "dnsTransportChanges": "DNS transport changes",
+  "didNotOpenOnServersPlural": "{n1, plural, one{{s0} did not open on {n1} server} other{{s0} did not open on {n1} servers}}",
+  "@didNotOpenOnServersPlural": {
+    "placeholders": {
+      "n1": {
+        "type": "num"
+      },
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "didNotOpenOnOfServers": "{s0} did not open on {n1} of {n2} servers",
+  "@didNotOpenOnOfServers": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      },
+      "n1": {
+        "type": "num"
+      },
+      "n2": {
+        "type": "num"
+      }
+    }
+  },
+  "opensInMs": "opens in {n0} ms",
+  "@opensInMs": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      }
+    }
+  },
+  "viaTunnel": "via tunnel",
+  "direct4": "direct",
+  "opensOnOfNodesPlural": "{n0, plural, one{opens on {n0} of {n1} node} other{opens on {n0} of {n1} nodes}}",
+  "@opensOnOfNodesPlural": {
+    "placeholders": {
+      "n0": {
+        "type": "num"
+      },
+      "n1": {
+        "type": "num"
+      }
+    }
+  },
+  "fallback2": "Fallback: {s0}",
+  "@fallback2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "theSiteOpensThroughAnotherServer": "the site opens through another server",
+  "everywhere": "Everywhere",
+  "onThisRouteOnly": "On this route only",
+  "ignoredSites2": "Ignored sites…",
+  "noOwnRoute": "no own route",
+  "rule6": "{s0} rule",
+  "@rule6": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "createRule2": "Create {s0} rule",
+  "@createRule2": {
+    "placeholders": {
+      "s0": {
+        "type": "String"
+      }
+    }
+  },
+  "checked2": "Checked"
 }

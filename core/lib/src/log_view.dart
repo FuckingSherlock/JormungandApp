@@ -127,7 +127,7 @@ const eventCats = <(String, List<String>)>[
   ('site', ['blocked', 'unreachable']),
   ('sub', ['updated', 'failed', 'removed', 'back', 'dead', 'diverged']),
   ('rules', ['fallback', 'targetBack', 'targetLost', 'targetFound', 'ruleSetFailed', 'ruleSetUpdated']),
-  ('dns', ['switched', 'failed', 'failedOnNode']),
+  ('dns', ['switched', 'down', 'up', 'transport']),
   ('node', ['addressMissing', 'lost', 'back']),
   ('speed', ['done', 'failed']),
   (
@@ -165,7 +165,7 @@ const eventNotifKind = <String, String>{
   // system (a revoked VPN) is `vpnRevoked`, see [eventNotifKindOf]
   'conn/connectFailed': 'connLost', 'conn/disconnected': 'connLost', 'core/tunNeedsAdmin': 'connLost', 'core/sysProxy': 'connLost',
   'core/stateLost': 'appData', 'core/stateRestored': 'appData',
-  'dns/failed': 'dnsFailed',
+  'dns/down': 'dnsFailed', 'dns/up': 'dnsFailed',
 };
 
 /// The toggle [e] answers to: [eventNotifKind] by its type, except `conn/disconnected` by the system (the VPN was
@@ -195,7 +195,6 @@ bool _spareOnly(EventRecord e) {
 /// [eventNotifKind] or here, so a new problem type must decide on purpose. `net/switched` is info but listed so the
 /// choice is explicit.
 const journalOnly = <String, String>{
-  'dns/failedOnNode': 'a consequence of dns/failed, the node is only named',
   'core/deprecated': 'a hint about the config, nothing the user can fix right now',
   'speed/failed': 'the user ran the test and sees the result',
   'core/updateFailed': 'a background update check; the user is not waiting for it',
@@ -274,16 +273,28 @@ const _keyFields = <String, List<String>>{
   'rules/targetBack': ['target'],
   'rules/targetLost': ['rule', 'app', 'target'],
   'rules/targetFound': ['rule', 'app', 'target'],
-  'dns/switched': ['from', 'to'],
-  'dns/failed': ['server'],
-  'dns/failedOnNode': ['server', 'node'],
+  'dns/down': ['sides'],
   'node/addressMissing': ['host'],
   'rules/ruleSetFailed': ['tag'],
   'rules/ruleSetUpdated': ['tag'],
 };
 
+// The DNS records keep ms / since in their sides: those are not what makes two of them the same. A switch is the same by the
+// side and the two providers, a transport change by the side and the provider.
+String _dnsSidesKey(Object? sides, String Function(Map side) of) =>
+    sides is List ? sides.whereType<Map>().map(of).join(',') : '';
+
+String _provider(Object? end) => end is Map ? '${end['provider'] ?? ''}' : '';
+
+final _keyOf = <String, String Function(EventRecord)>{
+  'dns/switched': (e) => _dnsSidesKey(e.data['sides'], (s) => '${s['side']}:${_provider(s['from'])}>${_provider(s['to'])}'),
+  'dns/transport': (e) => _dnsSidesKey(e.data['sides'], (s) => '${s['side']}:${s['provider']}'),
+};
+
 /// What makes two events "the same" for folding.
 String eventFoldKey(EventRecord e) {
+  final own = _keyOf[e.key];
+  if (own != null) return '${e.key}|${own(e)}';
   final f = _keyFields[e.key] ?? (e.cat == 'sub' ? const ['source'] : null);
   final String tail;
   if (f != null) {
@@ -809,7 +820,7 @@ Map<int, VpnMark> vpnLineMarks(Iterable<EventRecord> journal) {
 }
 
 /// Types the Events filter starts with switched off (still journaled and in Raw).
-const Set<String> defaultOffTypes = {'sub/diverged'};
+const Set<String> defaultOffTypes = {'sub/diverged', 'dns/transport'};
 
 /// The temporary filter of the Events tab (forgotten with the page).
 class EventFilter {

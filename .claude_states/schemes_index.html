@@ -1,0 +1,49 @@
+<!-- raw-html-confirmed -->
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Схемы событий — навигатор</title>
+<style>
+body{margin:0;background:#0d1117;color:#e6edf3;font:15px/1.5 system-ui,Segoe UI,sans-serif;padding:28px}
+h1{font-size:20px;margin:0 0 4px}h2{font-size:14px;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin:26px 0 10px}
+p{color:#8b949e;margin:0 0 18px}
+.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+a.c{display:block;background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px 16px;color:inherit;text-decoration:none}
+a.c:hover{border-color:#58a6ff;background:#1c2330}
+a.c b{display:block;font-size:15.5px;margin-bottom:4px}a.c code{color:#79c0ff;font-size:12.5px}
+a.c ul{margin:6px 0 0;padding-left:18px;color:#c9d1d9;font-size:13.5px}
+a.c.old{opacity:.7}
+</style></head><body>
+<h1>Схемы событий</h1>
+<p>Редизайн карточек журнала событий. Тексты UI — английские, пояснения — русские.</p>
+
+<h2>Текущие</h2>
+<div class="g">
+ <a class="c" href="dns_schemes.html"><b>DNS</b><code>dns_schemes.html</code><ul>
+  <li>dns/switched: смена сервера, смена транспорта, объединение сторон</li>
+  <li>каскад «все молчат» и «answers again»</li>
+  <li>dns/failed, dns/failedOnNode — вывод и предложение</li></ul></a>
+ <a class="c" href="dns_site_schemes.html"><b>Сайты</b><code>dns_site_schemes.html</code><ul>
+  <li>site/unreachable — согласованная карточка, Ignore site ▾</li>
+  <li>site/blocked, разбор «X / X»</li>
+  <li>сравнение blocked ↔ unreachable, вывод</li></ul></a>
+ <a class="c" href="schemes2.html"><b>Переподключение</b><code>schemes2.html</code><ul>
+  <li>conn/reconnected — компактный вид «Reconnected by you / core (…)»</li>
+  <li>смена режима и сервера стрелкой ›</li>
+  <li>реконнект от смены сети — строкой в net/switched</li></ul></a>
+ <a class="c" href="schemes3.html"><b>Сеть и запасной маршрут</b><code>schemes3.html</code><ul>
+  <li>net/switched — варианты A и B</li>
+  <li>rules/fallback, targetBack, правило приложения, targetLost</li></ul></a>
+ <a class="c" href="schemes4.html"><b>Соединение и ноды</b><code>schemes4.html</code><ul>
+  <li>conn/connectFailed (3 варианта), conn/lost, conn/failing</li>
+  <li>node/lost, rules/targetLost</li>
+  <li>исходники «было» — скриншоты</li></ul></a>
+ <a class="c" href="schemes5.html"><b>Простые карточки</b><code>schemes5.html</code><ul>
+  <li>sub/*, node/addressMissing, rules/ruleSet*</li>
+  <li>core/* и обновления, speed/*, auto/unstable</li></ul></a>
+</div>
+
+<h2>Старые</h2>
+<div class="g">
+ <a class="c old" href="node_lost_scheme.html"><b>node/lost — первая версия</b><code>node_lost_scheme.html</code></a>
+ <a class="c old" href="t1_schemes.html"><b>События т1</b><code>t1_schemes.html</code></a>
+ <a class="c old" href="vpn_line_scheme.html"><b>Строка VPN</b><code>vpn_line_scheme.html</code></a>
+</div>
+</body></html>

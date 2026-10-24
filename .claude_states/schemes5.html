@@ -1,0 +1,573 @@
+<!-- raw-html-confirmed -->
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<title>Простые события — схемы (sub, rules, core, speed, auto)</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--row:#1c2129;--line:#2a313c;--tx:#e6edf3;--mut:#8b949e;--acc:#3b82f6;--accbg:#13233d;--warn:#e3a008;--err:#f05252;--ok:#3fb950;--vio:#a78bfa;--viobg:#2a2342}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,Segoe UI,Roboto,sans-serif;padding:24px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:19px;margin:36px 0 6px;border-top:1px solid var(--line);padding-top:24px}
+p.note{color:var(--mut);margin:4px 0 14px;max-width:1180px}
+.grid{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}
+.col{width:380px}
+.phone{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.ic{width:34px;height:34px;border-radius:9px;background:var(--viobg);color:var(--vio);display:grid;place-items:center;flex:none;font-size:16px}
+.meta{color:var(--mut);font-size:13px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tag{font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px}
+.tag.w{background:#3a2c08;color:var(--warn)}.tag.e{background:#3d1414;color:var(--err)}
+.ttl{font-size:16px;font-weight:600;margin:3px 0 2px}
+.sub{color:var(--mut);font-size:13.5px}
+.box{background:var(--row);border-radius:10px;margin:10px 0 8px;overflow:hidden}
+.r{display:flex;gap:10px;padding:9px 11px;border-top:1px solid var(--line);align-items:center;font-size:14px}
+.r:first-child{border-top:0}
+.r .v{flex:1;min-width:0}.r .v small{display:block;color:var(--mut);font-size:12.5px}
+.r .chev{color:var(--mut)}
+.ev2{padding:14px;border-bottom:1px solid var(--line)}
+.ev2.warn{border-left:3px solid var(--warn)}.ev2.err{border-left:3px solid var(--err)}.ev2.okb{border-left:3px solid var(--ok)}.ev2.info{border-left:3px solid var(--line)}
+.tag.i{background:rgba(139,148,158,.15);color:var(--mut)}.tag.o{background:rgba(63,185,80,.15);color:var(--ok)}
+.sw{display:flex;margin:10px 0 8px;font-size:14px}.sw .c{flex:1;min-width:0;padding:8px 11px;line-height:20px}.sw .v small{display:block;color:var(--mut);font-size:12.5px;line-height:17px}
+.sw .from{background:linear-gradient(270deg,rgb(110,38,40),rgba(110,38,40,.35) 55%,rgba(110,38,40,.12));border-radius:calc(var(--rad) - 4px) 0 0 calc(var(--rad) - 4px);clip-path:polygon(0 0,calc(100% - 14px) 0,100% 50%,calc(100% - 14px) 100%,0 100%);padding-right:22px}
+.sw .to{background:linear-gradient(270deg,rgb(28,92,48),rgba(28,92,48,.35) 55%,rgba(28,92,48,.12));border-radius:0 calc(var(--rad) - 4px) calc(var(--rad) - 4px) 0;clip-path:polygon(0 0,100% 0,100% 100%,0 100%,14px 50%);margin-left:-10px;padding-left:24px}
+.hd{display:flex;gap:10px;align-items:center}.hd .ic{width:28px;height:28px;font-size:14px}
+.ev2 .ttl{margin:8px 0 0}
+.k2{color:var(--mut);font-size:13px;flex:none;width:52px}
+.nd{display:block;font-size:14px;color:var(--tx);position:relative;padding-left:15px;margin-top:2px}
+.nd::before{content:"";position:absolute;left:3px;top:-3px;width:7px;height:11px;border-left:1.5px solid var(--mut);border-bottom:1.5px solid var(--mut);border-bottom-left-radius:3px}
+.r .rb{width:22px;flex:none;display:grid;place-items:center}
+.r{padding:10px 11px}
+.r .chev,.r .go,.r .rb{display:flex;align-items:center;justify-content:center;height:20px}
+.r .chev i,.r .go i,.r .rb i{display:flex}.r .chev svg,.r .go svg,.r .rb svg{display:block}
+.r.sp{padding:0;align-items:stretch;gap:0}
+.main{flex:1;display:flex;gap:10px;align-items:center;padding:10px 11px;min-width:0}
+.main.bad{background:linear-gradient(90deg,rgb(110,38,40),rgba(110,38,40,.45) 45%,rgba(110,38,40,0) 85%)}
+.main.ok{background:linear-gradient(90deg,rgb(28,92,48),rgba(28,92,48,.45) 45%,rgba(28,92,48,0) 85%)}
+:root{--err-rgb:240,82,82;--ok-rgb:63,185,80;--acc-rgb:59,130,246;--rad:14px}
+body.th-original{--bg:#0B0F1A;--card:#131929;--row:#1A2035;--line:#252D45;--tx:#D4DEFF;--mut:#7B8EC8;--acc:#4F8EFF;--acc-rgb:79,142,255;--warn:#F0A040;--err:#F05060;--err-rgb:240,80,96;--ok:#00C896;--ok-rgb:0,200,150;--rad:14px}
+body.th-github{--bg:#0D1117;--card:#161B22;--row:#1C2128;--line:#30363D;--tx:#E6EDF3;--mut:#8B949E;--acc:#2F81F7;--acc-rgb:47,129,247;--warn:#D29922;--err:#F85149;--err-rgb:248,81,73;--ok:#3FB950;--ok-rgb:63,185,80;--rad:8px}
+body[class^="th-"] .phone{border-radius:var(--rad)}
+body[class^="th-"] .box{border-radius:calc(var(--rad) - 4px)}
+body[class^="th-"] .b,body[class^="th-"] .rb,body[class^="th-"] .r .chev,body[class^="th-"] .r .go,body[class^="th-"] .act{color:var(--acc)}
+body[class^="th-"] .b{background:rgba(var(--acc-rgb),.15);border-radius:calc(var(--rad) - 6px)}
+body[class^="th-"] .tag.w{background:rgba(210,153,34,.15);color:var(--warn)}
+body[class^="th-"] .ev2.warn{border-left-color:var(--warn)}
+.r.sp .sep{margin:0}.r.sp .go{height:auto;width:44px}
+.r .v{line-height:20px}.r .v small{line-height:17px}
+.rb i,.go i,.chev i{display:inline-flex}.rb svg,.go svg,.chev svg{width:18px;height:18px;vertical-align:middle}
+.rb{color:#60a5fa}.r .chev,.r .go{color:#60a5fa;width:22px;flex:none;text-align:center}
+.pick{background:#11161d;border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:14px;font-size:13px}
+.pick .pr{display:flex;align-items:center;gap:6px;padding:3px 0}.pick .pr b{width:46px;color:var(--mut);font-weight:600}
+.pick button{background:var(--row);border:1px solid var(--line);color:#c9d1d9;border-radius:7px;width:32px;height:30px;cursor:pointer;display:grid;place-items:center;padding:0}
+.pick button.on{border-color:var(--acc);background:var(--accbg);color:#60a5fa}.pick svg{width:18px;height:18px}
+.sep{width:1px;align-self:stretch;background:var(--line);margin:-9px 0}
+.sec{color:var(--mut);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;padding:8px 11px 4px;background:var(--card)}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.b{background:var(--accbg);color:#60a5fa;border-radius:8px;padding:6px 12px;font-size:14px}
+.b.p{background:var(--acc);color:#fff}
+.cause{font-size:13.5px;margin-top:6px;color:var(--mut)}.cause b{color:var(--tx)}
+.crit{background:#11161d;border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:13.5px;color:#c9d1d9;margin-top:10px;max-width:1180px}
+.crit ul{margin:4px 0 0;padding-left:18px}.crit li{margin:2px 0}
+.lbl{font-size:12px;font-weight:700;color:var(--acc);margin:0 0 6px}
+.bad-lbl{color:var(--err)}
+code{background:#1f2630;padding:0 4px;border-radius:4px;font-size:12.5px}
+/* пара: было + новое */
+.pair{display:flex;gap:20px;align-items:flex-start;margin:0 0 20px;flex-wrap:wrap}
+.was{width:300px}.was .cap{font-size:12px;color:var(--err);font-weight:700;margin-bottom:6px}
+.was .frame{border:1px solid var(--line);border-radius:8px;max-height:300px;overflow:auto;background:#0b0f1a}
+.was img{width:300px;display:block}
+.new{width:380px}
+.new .cap{font-size:12px;color:var(--acc);font-weight:700;margin-bottom:6px}
+.need{color:var(--warn)}
+.ba{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start;margin:0 0 18px}
+.ba>.full{grid-column:1/-1}
+.ba>div{min-width:0}
+.ba .phone{width:auto;max-width:380px}
+.ba .none{color:var(--mut);font-size:13px;padding:10px;border:1px dashed rgba(255,255,255,.18);border-radius:8px}
+.ba img{max-width:100%;height:auto}
+.ba .was,.ba .new{width:auto}
+</style></head><body>
+
+<h1>Схемы: простые события — sub, rules, core, speed, auto</h1>
+<p class="note">Тексты UI на английском, пояснения — на русском. Единый вид: строка времени с иконкой, заголовок, блок данных во всю ширину (только когда есть настоящие строки), Cause, кнопки (<b>Details ▾</b> всегда первая). Тап по карточке ничего не открывает. Слева «сейчас» — кадры из <code>app/build/event_shots</code> (в кадре несколько форм: тост, уведомление, строка; нужна строка Logs — внизу кадра, прокрутка в рамке). Номера кадров — по порядку из README, у семейства <code>sub_*</code> часть номеров приблизительная.</p>
+<div class="pick" id="pick" style="max-width:380px"></div>
+
+<!-- ============ 1. SUB ============ -->
+<h2>1. Подписки и серверы: <code>sub/*</code>, <code>node/addressMissing</code></h2>
+
+<div class="pair ba">
+ <div class="was"><div class="cap">сейчас: sub_3.png (sub/updated)</div><div class="frame"><img src="../app/build/event_shots/sub_3.png" alt=""></div></div>
+ <div class="new"><div class="cap">sub/updated — info, по таймеру</div>
+  <div class="phone"><div class="ev2 info">
+   <div class="hd"><div class="ic">☁</div><div class="meta">02:58 <span class="tag i">INFO</span></div></div>
+   <div class="ttl">Remnawave updated: +3 −1</div>
+   <div class="sub">42 servers</div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Open</span></div>
+  </div></div>
+ </div>
+</div>
+<div class="pair ba">
+ <div></div>
+ <div class="new"><div class="cap">sub/updated — warn: убраны используемые серверы</div>
+  <div class="phone"><div class="ev2 warn">
+   <div class="hd"><div class="ic">☁</div><div class="meta">02:58 <span class="tag w">WARN</span></div></div>
+   <div class="ttl">Remnawave removed 2 servers in use</div>
+   <div class="box">
+    <div class="sec">Removed</div>
+    <div class="r"><span class="v">remna · REALITY<span class="nd">RU-SPB ➜ Нидерланды</span></span></div>
+    <div class="r"><span class="v">remna · HY2<span class="nd">RU-SPB ➜ Германия</span></span></div>
+    <div class="sec">Traffic now</div>
+    <div class="r"><span class="k2">Rule</span><span class="v">Streaming<small>If unavailable: Main flow</small></span><span class="chev"><i data-k="go"></i></span></div>
+    <div class="r"><span class="k2">App</span><span class="v">Telegram<small>If unavailable: Direct</small></span><span class="chev"><i data-k="go"></i></span></div>
+   </div>
+   <div class="cause">Cause: <b>the provider</b> dropped them from the list</div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Choose for all</span><span class="b">Open subscription</span></div>
+  </div></div>
+ </div>
+</div>
+
+<div class="pair ba">
+ <div class="was"><div class="cap">сейчас: sub_1.png (sub/failed)</div><div class="frame"><img src="../app/build/event_shots/sub_1.png" alt=""></div></div>
+ <div class="new"><div class="cap">sub/failed — error, ×N пока та же ошибка</div>
+  <div class="phone"><div class="ev2 err">
+   <div class="hd"><div class="ic">☁</div><div class="meta">03:14 <span class="tag e">ERROR</span> ×3</div></div>
+   <div class="ttl">Could not update Remnawave</div>
+   <div class="box">
+    <div class="r sp"><div class="main bad"><span class="v">HTTP 503<small>provider answered with an error</small></span></div></div>
+   </div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Retry</span><span class="b">Open</span></div>
+  </div></div>
+ </div>
+</div>
+<div class="pair ba">
+ <div></div>
+ <div class="new"><div class="cap">sub/diverged — warn, по умолчанию скрыто</div>
+  <div class="phone"><div class="ev2 warn">
+   <div class="hd"><div class="ic">⇄</div><div class="meta">03:14 <span class="tag w">WARN</span></div></div>
+   <div class="ttl">Remnawave: direct and VPN copies differ</div>
+   <div class="sw"><div class="c from"><span class="v">Direct<small>41 servers</small></span></div><div class="c to"><span class="v">VPN<small>42 servers</small></span></div></div>
+   <div class="cause">Used: <b>the VPN copy</b> — it is the newer one by Last-Modified</div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Open</span><span class="b">Send report</span></div>
+  </div></div>
+ </div>
+</div>
+
+<div class="pair ba">
+ <div class="was"><div class="cap">сейчас: sub_5.png (sub/back)</div><div class="frame"><img src="../app/build/event_shots/sub_5.png" alt=""></div></div>
+ <div class="new"><div class="cap">sub/back — info, пара с warn sub/updated</div>
+  <div class="phone"><div class="ev2 okb">
+   <div class="hd"><div class="ic">☁</div><div class="meta">03:44 <span class="tag o">OK</span></div></div>
+   <div class="ttl">Servers returned to Remnawave</div>
+   <div class="box">
+    <div class="r"><span class="v">remna · REALITY<span class="nd">RU-SPB ➜ Нидерланды</span></span></div>
+    <div class="r"><span class="v">remna · HY2<span class="nd">RU-SPB ➜ Германия</span></span></div>
+    <div class="sec">Goes through them again</div>
+    <div class="r"><span class="k2">Rule</span><span class="v">Streaming</span><span class="chev"><i data-k="go"></i></span></div>
+    <div class="r"><span class="k2">App</span><span class="v">Telegram</span><span class="chev"><i data-k="go"></i></span></div>
+   </div>
+   <div class="btns"><span class="b">Details ▾</span></div>
+  </div></div>
+ </div>
+</div>
+<div class="pair ba">
+ <div></div>
+ <div class="new"><div class="cap">node/addressMissing — warn</div>
+  <div class="phone"><div class="ev2 warn">
+   <div class="hd"><div class="ic">⌀</div><div class="meta">04:02 <span class="tag w">WARN</span> ×2</div></div>
+   <div class="ttl">Remnawave: domain de1.example.net does not exist</div>
+   <div class="box">
+    <div class="r"><span class="k2">Servers</span><span class="v">3 with this address</span></div>
+    <div class="r sp"><div class="main bad"><span class="v">DNS: no such name<small>confirmed again after a minute</small></span></div></div>
+   </div>
+   <div class="cause">Cause: <b>the provider's address</b> — not a network problem</div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Open</span><span class="b">Update subscription</span></div>
+  </div></div>
+ </div>
+</div>
+
+<div class="pair ba">
+ <div class="was"><div class="cap">сейчас: sub_7.png (sub/removed, старый журнал) и sub/dead</div><div class="frame"><img src="../app/build/event_shots/sub_7.png" alt=""></div></div>
+ <div class="new"><div class="cap">sub/removed — только старый журнал</div>
+  <div class="phone"><div class="ev2 info">
+   <div class="hd"><div class="ic">☁</div><div class="meta">Oct 17 <span class="tag i">INFO</span></div></div>
+   <div class="ttl">The provider removed 3 servers from Remnawave</div>
+   <div class="sub">See Unavailable in Nodes, their settings</div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Open</span></div>
+  </div></div>
+ </div>
+</div>
+<div class="pair ba">
+ <div></div>
+ <div class="new"><div class="cap">sub/dead — не пишется (только мокап)</div>
+  <div class="phone"><div class="ev2 warn">
+   <div class="hd"><div class="ic">☁</div><div class="meta">04:10 <span class="tag w">WARN</span></div></div>
+   <div class="ttl">Servers of Remnawave do not respond</div>
+   <div class="sub">Contact the subscription provider's support</div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Open</span></div>
+  </div></div>
+ </div>
+</div>
+
+<div class="crit"><ul>
+ <li>sub/updated info и sub/failed остаются лёгкими: заголовок + строка; блок данных — у warn-варианта (серверы с «└» и задетые правила/приложения с go) и у sub/failed (красная строка ошибки).</li>
+ <li>Серверы везде: «подписка · протокол», под ней «└ нода». Задетые настройки — ряды с подписью Rule / App и go-иконкой (тап — настройка), как раньше.</li>
+ <li>Счётчик ×N в строке времени у sub/failed и node/addressMissing (повторы на одном событии).</li>
+ <li>sub/diverged: две карточки со стрелкой — только для короткого счёта серверов (41 › 42), не для имён. По умолчанию тип скрыт (<code>defaultOffTypes</code>).</li>
+ <li>sub/removed и sub/dead — устаревшие: первый только в старом журнале, второй вообще не пишется ядром; рисуются лёгкими, чтобы старый журнал не выпадал из вида.</li>
+ <li>Кнопки: Details ▾ первая, затем как в <code>logs.md</code> (Retry / Open / Choose for all / Update subscription / Send report).</li>
+ <li class="need">нужно новое поле: sub/failed — человеческая расшифровка кода ошибки (сейчас только текст <code>error</code>); sub/updated warn — «If unavailable» куда ушёл трафик строки (сейчас берётся из <code>affected[].to</code>, поле есть).</li>
+</ul></div>
+
+<!-- ============ 2. RULES ============ -->
+<h2>2. Наборы правил: <code>rules/ruleSetFailed</code>, <code>rules/ruleSetUpdated</code></h2>
+<div class="pair ba">
+ <div class="was"><div class="cap">сейчас: rules_6.png / rules_7.png</div><div class="frame"><img src="../app/build/event_shots/rules_6.png" alt=""></div></div>
+ <div class="new"><div class="cap">rules/ruleSetFailed — warn, есть копия</div>
+  <div class="phone"><div class="ev2 warn">
+   <div class="hd"><div class="ic">≣</div><div class="meta">05:20 <span class="tag w">WARN</span> ×2</div></div>
+   <div class="ttl">Could not load rule list geosite-ru</div>
+   <div class="box">
+    <div class="r"><span class="k2">Copy</span><span class="v">from Oct 23 19:02<small>in use until the download works</small></span></div>
+    <div class="r sp"><div class="main bad"><span class="v">HTTP 404<small>raw.githubusercontent.com</small></span></div></div>
+   </div>
+   <div class="cause">Next try in <b>2 min</b></div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Retry</span><span class="b">Open</span></div>
+  </div></div>
+  <div class="phone" style="margin-top:12px"><div class="ev2 warn">
+   <div class="hd"><div class="ic">≣</div><div class="meta">05:20 <span class="tag w">WARN</span></div></div>
+   <div class="ttl">Could not load rule list geosite-ads</div>
+   <div class="box">
+    <div class="r sp"><div class="main bad"><span class="v">No copy<small>rules with this list do not work</small></span></div></div>
+    <div class="r sp"><div class="main bad"><span class="v">timeout<small>github.com</small></span></div></div>
+   </div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Retry</span><span class="b">Open</span></div>
+  </div></div>
+ </div>
+</div>
+<div class="pair ba">
+ <div></div>
+ <div class="new"><div class="cap">rules/ruleSetUpdated — info</div>
+  <div class="phone"><div class="ev2 info">
+   <div class="hd"><div class="ic">≣</div><div class="meta">05:22 <span class="tag i">INFO</span></div></div>
+   <div class="ttl">Rule list geosite-ru updated</div>
+   <div class="btns"><span class="b">Details ▾</span></div>
+  </div></div>
+  <div class="phone" style="margin-top:12px"><div class="ev2 info">
+   <div class="hd"><div class="ic">≣</div><div class="meta">05:22 <span class="tag i">INFO</span></div></div>
+   <div class="ttl">Rule lists updated: 3</div>
+   <div class="sub">geosite-ru, geoip-ru and 1 more</div>
+   <div class="btns"><span class="b">Details ▾</span></div>
+  </div></div>
+ </div>
+</div>
+<div class="crit"><ul>
+ <li>Два состояния ruleSetFailed: есть копия (зелёного нет — это всё ещё warn, но строка Copy нейтральная) / копии нет (красная строка «No copy»).</li>
+ <li>Причина загрузки — красная строка с текстом ошибки; адрес — под ней мелко (сейчас <code>url</code> в данных есть, в тексте не показывается).</li>
+ <li>«Next try in …» — по <code>RetryPolicy</code> (1 → 2 → 5 → 15 мин); <span class="need">нужно новое поле: nextTryAt (сейчас интервал известен только ядру)</span>.</li>
+ <li>Несколько списков с одной причиной — одна карточка («Rule lists did not load: N»), как в <code>logs.md</code>.</li>
+ <li>ruleSetUpdated — без блока; кнопок нет, кроме Details ▾.</li>
+</ul></div>
+
+<!-- ============ 3. CORE ============ -->
+<h2>3. Ядро и TUN: <code>core/*</code></h2>
+
+<div class="pair ba">
+ <div class="was"><div class="cap">сейчас: core_1.png … core_3.png</div><div class="frame"><img src="../app/build/event_shots/core_1.png" alt=""></div></div>
+ <div class="new"><div class="cap">core/crashed — error</div>
+  <div class="phone"><div class="ev2 err">
+   <div class="hd"><div class="ic">⚙</div><div class="meta">06:01 <span class="tag e">ERROR</span></div></div>
+   <div class="ttl">sing-box crashed · code 2</div>
+   <div class="sub">Starting it again</div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Retry</span><span class="b">Send report</span></div>
+  </div></div>
+  <div class="cap" style="margin-top:14px">core/restartFailed — error, ×N</div>
+  <div class="phone"><div class="ev2 err">
+   <div class="hd"><div class="ic">⚙</div><div class="meta">06:01 <span class="tag e">ERROR</span> ×3</div></div>
+   <div class="ttl">sing-box could not start again</div>
+   <div class="box">
+    <div class="r"><span class="k2">Attempt</span><span class="v">3</span></div>
+    <div class="r sp"><div class="main bad"><span class="v">Error<small>listen tcp 127.0.0.1:9090: bind: address already in use</small></span></div></div>
+   </div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Retry</span><span class="b">Send report</span></div>
+  </div></div>
+ </div>
+</div>
+<div class="pair ba">
+ <div></div>
+ <div class="new"><div class="cap">core/restarted — info, закрывает падение</div>
+  <div class="phone"><div class="ev2 okb">
+   <div class="hd"><div class="ic">⚙</div><div class="meta">06:01 <span class="tag o">OK</span></div></div>
+   <div class="ttl">Core is running again</div>
+   <div class="sub">down for 4 s · attempt 2</div>
+   <div class="btns"><span class="b">Details ▾</span></div>
+  </div></div>
+  <div class="cap" style="margin-top:14px">core/down — только старый журнал</div>
+  <div class="phone"><div class="ev2 err">
+   <div class="hd"><div class="ic">⚙</div><div class="meta">Oct 16 <span class="tag e">ERROR</span></div></div>
+   <div class="ttl">Core not running for 30 s</div>
+   <div class="sub">Traffic is blocked, the system proxy is kept</div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Retry</span></div>
+  </div></div>
+ </div>
+</div>
+
+<div class="pair ba">
+ <div class="was"><div class="cap">сейчас: core_4.png … core_6.png</div><div class="frame"><img src="../app/build/event_shots/core_4.png" alt=""></div></div>
+ <div class="new"><div class="cap">core/tunNeedsAdmin — error</div>
+  <div class="phone"><div class="ev2 err">
+   <div class="hd"><div class="ic">⛨</div><div class="meta">07:10 <span class="tag e">ERROR</span></div></div>
+   <div class="ttl">TUN needs administrator rights</div>
+   <div class="sub">Run the app as administrator or switch to Proxy mode</div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Network settings</span></div>
+  </div></div>
+  <div class="cap" style="margin-top:14px">core/deprecated — warn</div>
+  <div class="phone"><div class="ev2 warn">
+   <div class="hd"><div class="ic">⚙</div><div class="meta">07:12 <span class="tag w">WARN</span></div></div>
+   <div class="ttl">sing-box: a deprecated setting</div>
+   <div class="box">
+    <div class="r"><span class="v">legacy DNS server format will be removed in sing-box 1.14.0</span></div>
+   </div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Send report</span></div>
+  </div></div>
+ </div>
+</div>
+<div class="pair ba">
+ <div></div>
+ <div class="new"><div class="cap">core/sysProxy — info (по команде / авто) и warn (не вышло)</div>
+  <div class="phone"><div class="ev2 info">
+   <div class="hd"><div class="ic">⇆</div><div class="meta">07:11 <span class="tag i">INFO</span></div></div>
+   <div class="ttl">You removed the system proxy</div>
+   <div class="sub">Removed with Remove system proxy</div>
+   <div class="btns"><span class="b">Details ▾</span></div>
+  </div></div>
+  <div class="phone" style="margin-top:12px"><div class="ev2 warn">
+   <div class="hd"><div class="ic">⇆</div><div class="meta">07:11 <span class="tag w">WARN</span></div></div>
+   <div class="ttl">System proxy could not be set</div>
+   <div class="box"><div class="r sp"><div class="main bad"><span class="v">Access denied<small>registry write failed</small></span></div></div></div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Retry</span></div>
+  </div></div>
+ </div>
+</div>
+
+<div class="pair ba">
+ <div class="was"><div class="cap">сейчас: core_7.png … core_9.png</div><div class="frame"><img src="../app/build/event_shots/core_7.png" alt=""></div></div>
+ <div class="new"><div class="cap">core/stateRestored — warn (stateLost — тот же вид, ERROR)</div>
+  <div class="phone"><div class="ev2 warn">
+   <div class="hd"><div class="ic">▣</div><div class="meta">08:00 <span class="tag w">WARN</span></div></div>
+   <div class="ttl">Saved data was damaged — restored from a backup</div>
+   <div class="box">
+    <div class="r"><span class="k2">Backup</span><span class="v">Oct 22 18:40<small>later changes are lost</small></span></div>
+   </div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Send report</span></div>
+  </div></div>
+ </div>
+</div>
+<div class="pair ba">
+ <div></div>
+ <div class="new"><div class="cap">core/tunTcpDead / tunTcpBack — пара</div>
+  <div class="phone"><div class="ev2 err">
+   <div class="hd"><div class="ic">⇅</div><div class="meta">08:30 <span class="tag e">ERROR</span></div></div>
+   <div class="ttl">TCP does not pass the tunnel</div>
+   <div class="box">
+    <div class="r"><span class="k2">Stack</span><span class="v">gvisor</span></div>
+    <div class="r"><span class="k2">Apps</span><span class="v">Chrome, Telegram</span></div>
+   </div>
+   <div class="cause">Cause: <b class="need">текст — после разбора бага</b></div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Reconnect</span><span class="b">Send report</span></div>
+  </div>
+  <div class="ev2 okb">
+   <div class="hd"><div class="ic">⇅</div><div class="meta">08:31 <span class="tag o">OK</span></div></div>
+   <div class="ttl">TCP passes the tunnel again</div>
+   <div class="sub">gvisor · back after 52 s without TCP</div>
+   <div class="btns"><span class="b">Details ▾</span></div>
+  </div></div>
+ </div>
+</div>
+
+<div class="crit"><ul>
+ <li>crashed / restarted / restartFailed — одна цепочка («одна строка, статус по последней» в <code>logs.md</code>): error → error ×N → OK; ничего не добавляем, кроме блока у restartFailed (попытка + красная строка ошибки).</li>
+ <li><b>tunTcpDead:</b> только рестайл. Cause-строка «текст — после разбора бага» (открытый баг, причина не ясна); приложения — через запятую в одной строке, не по строке на приложение.</li>
+ <li>Красная/зелёная плашка строки — только для проверок и ошибок; нейтральные строки (Attempt, Stack, Backup) без цвета.</li>
+ <li>sysProxy: две формы — info (включили/убрали) без блока, warn (не вышло) с красной строкой ошибки.</li>
+ <li>core/down и core/stateLost: старый журнал и редкий случай — тот же вид, что у соседей.</li>
+ <li>Кнопки: Details ▾ первая; Retry — пока ядро не запущено; Send report — на error; Network settings у tunNeedsAdmin — <span class="need">нужно уточнить: у события сейчас нет кнопки, предлагается настройка TUN</span>.</li>
+ <li class="need">нужно новое поле: core/deprecated — версия, в которой уберут (сейчас только свободный текст <code>text</code>); core/sysProxy warn — расшифровка ошибки не нужна, <code>error</code> есть.</li>
+</ul></div>
+
+<h3 style="margin:26px 0 6px;font-size:16px">Обновление приложения</h3>
+<div class="pair ba">
+ <div class="was"><div class="cap">сейчас: update_1.png … update_4.png</div><div class="frame"><img src="../app/build/event_shots/update_1.png" alt=""></div></div>
+ <div class="new"><div class="cap">core/updateAvailable — info</div>
+  <div class="phone"><div class="ev2 info">
+   <div class="hd"><div class="ic">⬇</div><div class="meta">09:00 <span class="tag i">INFO</span></div></div>
+   <div class="ttl">Version 1.12.0 is available</div>
+   <div class="sw"><div class="c from"><span class="v">1.11.4</span></div><div class="c to"><span class="v">1.12.0</span></div></div>
+   <div class="box">
+    <div class="r"><span class="k2">Channel</span><span class="v">stable</span></div>
+    <div class="r"><span class="k2">Via</span><span class="v">GitHub releases</span></div>
+   </div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b p">Install</span><span class="b">Open update</span></div>
+  </div></div>
+  <div class="cap" style="margin-top:14px">core/updateDownloaded — info</div>
+  <div class="phone"><div class="ev2 info">
+   <div class="hd"><div class="ic">⬇</div><div class="meta">09:02 <span class="tag i">INFO</span></div></div>
+   <div class="ttl">Version 1.12.0 downloaded</div>
+   <div class="sub">patch 3.1 MB instead of 28 MB · GitHub releases</div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b p">Install</span></div>
+  </div></div>
+  <div class="cap" style="margin-top:14px">core/updateInstalled — OK</div>
+  <div class="phone"><div class="ev2 okb">
+   <div class="hd"><div class="ic">⬇</div><div class="meta">09:03 <span class="tag o">OK</span></div></div>
+   <div class="ttl">App updated</div>
+   <div class="sw"><div class="c from"><span class="v">1.11.4</span></div><div class="c to"><span class="v">1.12.0</span></div></div>
+   <div class="btns"><span class="b">Details ▾</span></div>
+  </div></div>
+ </div>
+</div>
+<div class="pair ba">
+ <div></div>
+ <div class="new"><div class="cap">core/updateDeltaFailed — warn</div>
+  <div class="phone"><div class="ev2 warn">
+   <div class="hd"><div class="ic">⬇</div><div class="meta">09:01 <span class="tag w">WARN</span></div></div>
+   <div class="ttl">The update patch failed</div>
+   <div class="box">
+    <div class="r sp"><div class="main bad"><span class="v">Checksum mismatch<small>patch from 1.11.4 · 2 attempts</small></span></div></div>
+   </div>
+   <div class="cause">The full package is downloaded instead</div>
+   <div class="btns"><span class="b">Details ▾</span></div>
+  </div></div>
+  <div class="cap" style="margin-top:14px">core/updateFailed — error (stage: check / download / verify / install)</div>
+  <div class="phone"><div class="ev2 err">
+   <div class="hd"><div class="ic">⬇</div><div class="meta">09:02 <span class="tag e">ERROR</span> ×2</div></div>
+   <div class="ttl">Could not download the update</div>
+   <div class="box">
+    <div class="r sp"><div class="main bad"><span class="v">Connection reset<small>stage: download · 3 attempts</small></span></div></div>
+   </div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Retry</span><span class="b">Send report</span></div>
+  </div></div>
+  <div class="cap" style="margin-top:14px">core/updateChannelEmpty — info</div>
+  <div class="phone"><div class="ev2 info">
+   <div class="hd"><div class="ic">⬇</div><div class="meta">09:00 <span class="tag i">INFO</span></div></div>
+   <div class="ttl">No release in the channel beta</div>
+   <div class="sub">3 update sources checked</div>
+   <div class="btns"><span class="b">Details ▾</span></div>
+  </div></div>
+ </div>
+</div>
+<div class="crit"><ul>
+ <li>Версии — единственное место, где одноцветные стрелки <code>.sw</code> уместны: «1.11.4 › 1.12.0» (updateAvailable, updateInstalled), короткие значения.</li>
+ <li>Статус операции — по последней стадии (<code>logs.md</code>): Available → Downloaded (→ DeltaFailed) → Installed; уведомления идут через <code>UpdateFlow</code>, карточка — только журнал.</li>
+ <li>updateFailed: заголовок меняется по <code>stage</code> (check / download / verify / install), красная строка — текст ошибки + стадия + число попыток.</li>
+ <li>Install — основная кнопка (<code>.b.p</code>) только пока обновление не установлено.</li>
+ <li class="need">нужно новое поле: Install / Open update — действие у карточки (в данных события нет признака «ещё можно ставить» после установки; нужно скрывать кнопку по <code>updateInstalled</code> того же version).</li>
+</ul></div>
+
+<!-- ============ 4. SPEED ============ -->
+<h2>4. Спидтест: <code>speed/done</code>, <code>speed/failed</code></h2>
+<div class="pair ba">
+ <div class="was"><div class="cap">сейчас: core_8.png (speed/done / failed в кадрах core)</div><div class="frame"><img src="../app/build/event_shots/core_8.png" alt=""></div></div>
+ <div class="new"><div class="cap">speed/done — OK</div>
+  <div class="phone"><div class="ev2 okb">
+   <div class="hd"><div class="ic">⚡</div><div class="meta">10:15 <span class="tag o">OK</span></div></div>
+   <div class="ttl">Speed test: 94.2 ↓ / 31.7 ↑ Mbps</div>
+   <div class="box">
+    <div class="r"><span class="k2">Down</span><span class="v">94.2 Mbps</span></div>
+    <div class="r"><span class="k2">Up</span><span class="v">31.7 Mbps</span></div>
+    <div class="r"><span class="k2">Ping</span><span class="v">48 ms</span></div>
+    <div class="r"><span class="k2">Route</span><span class="v">remna · REALITY<span class="nd">RU-SPB ➜ Нидерланды</span></span><span class="chev"><i data-k="go"></i></span></div>
+   </div>
+   <div class="btns"><span class="b">Details ▾</span></div>
+  </div></div>
+ </div>
+</div>
+<div class="pair ba">
+ <div></div>
+ <div class="new"><div class="cap">speed/failed — error</div>
+  <div class="phone"><div class="ev2 err">
+   <div class="hd"><div class="ic">⚡</div><div class="meta">10:16 <span class="tag e">ERROR</span></div></div>
+   <div class="ttl">Speed test failed</div>
+   <div class="box">
+    <div class="r"><span class="k2">Route</span><span class="v">remna · HY2<span class="nd">RU-SPB ➜ Германия</span></span><span class="chev"><i data-k="go"></i></span></div>
+    <div class="r sp"><div class="main bad"><span class="v">timeout<small>no data in 15 s</small></span></div></div>
+   </div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Retry</span></div>
+  </div></div>
+ </div>
+</div>
+<div class="crit"><ul>
+ <li>Сейчас в данных: <code>down</code>, <code>up</code> (бит/с), <code>latency</code> (мс) и у failed <code>error</code>. Заголовок — коротко, цифры в блоке дублируют его построчно (по желанию заголовок можно оставить «Speed test finished», а цифры только в блоке — на выбор).</li>
+ <li>Строка Route (какой сервер мерили) — <span class="need">нужно новое поле: server / entry в speed/done и speed/failed</span>; без него блок — только Down / Up / Ping.</li>
+ <li>Retry только у failed (<code>logs.md</code>); у done кнопок нет, кроме Details ▾.</li>
+ <li>Событие пишет сама операция замера группы, пользователь запустил его сам — уведомления нет.</li>
+</ul></div>
+
+<!-- ============ 5. AUTO ============ -->
+<h2>5. Auto: нестабильная запись — <code>auto/unstable</code></h2>
+<div class="pair ba">
+ <div class="was"><div class="cap">сейчас: auto_3.png</div><div class="frame"><img src="../app/build/event_shots/auto_3.png" alt=""></div></div>
+ <div class="new"><div class="cap">auto/unstable — warn (текущий маршрут)</div>
+  <div class="phone"><div class="ev2 warn">
+   <div class="hd"><div class="ic">≈</div><div class="meta">11:05 <span class="tag w">WARN</span></div></div>
+   <div class="ttl">Fast Europe is unstable</div>
+   <div class="box">
+    <div class="r"><span class="k2">Entry</span><span class="v">Fast Europe</span><span class="chev"><i data-k="go"></i></span></div>
+    <div class="r"><span class="k2">Fails</span><span class="v">5 in a row<small>excluded for 10 min</small></span></div>
+   </div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Open</span><span class="b">Check now</span></div>
+  </div></div>
+ </div>
+</div>
+<div class="pair ba">
+ <div></div>
+ <div class="new"><div class="cap">auto/unstable — info, запасная запись (spare)</div>
+  <div class="phone"><div class="ev2 info">
+   <div class="hd"><div class="ic">≈</div><div class="meta">11:07 <span class="tag i">INFO</span></div></div>
+   <div class="ttl">Spare entry Reserve DE is unstable</div>
+   <div class="sub">4 failures, excluded for 10 min · no traffic goes through it</div>
+   <div class="btns"><span class="b">Details ▾</span><span class="b">Open</span></div>
+  </div></div>
+ </div>
+</div>
+<div class="crit"><ul>
+ <li>Текст события сегодня: «&lt;X&gt; is unstable · N failures, excluded for M min» — режется на заголовок и две строки блока (Entry с go, Fails: число и срок исключения).</li>
+ <li>Запасная запись (<code>spare: true</code>) — info и лёгкая карточка без блока: трафик через неё не идёт, уведомления нет.</li>
+ <li>Return once / Don't exclude скрыты флагом до фичи «исключение на время» — в схеме их нет; когда включат, добавляются после Open.</li>
+ <li>Повторы по тому же адресу — счётчик ×N в строке времени.</li>
+</ul></div>
+
+<h2 style="font-size:16px">Открытые вопросы</h2>
+<div class="crit"><ul>
+ <li>Speed: оставить цифры и в заголовке, и в блоке, или только в блоке?</li>
+ <li>sub/removed и sub/dead (старый журнал / мокап): рисовать ли их вообще, или оставить как есть?</li>
+ <li>tunNeedsAdmin: добавлять ли кнопку (например, открыть настройки режима)?</li>
+ <li>Кадры sub_*: номера в README группируют несколько форм в один файл; если на какой-то карточке не тот кадр — достаточно сверить по подписи внутри картинки.</li>
+</ul></div>
+
+<script>
+const I={
+'refresh-cw':'<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+'rotate-cw':'<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
+'refresh-ccw':'<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/>',
+'redo-2':'<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/>',
+'repeat-2':'<path d="m2 9 3-3 3 3"/><path d="M13 18H7a2 2 0 0 1-2-2V6"/><path d="m22 15-3 3-3-3"/><path d="M11 6h6a2 2 0 0 1 2 2v10"/>',
+'x':'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+'circle-help':'<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+'plus':'<path d="M5 12h14"/><path d="M12 5v14"/>',
+'circle-plus':'<circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/>',
+'square-plus':'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M8 12h8"/><path d="M12 8v8"/>',
+'list-plus':'<path d="M16 5H3"/><path d="M11 12H3"/><path d="M16 19H3"/><path d="M18 9v6"/><path d="M21 12h-6"/>',
+'chevron-right':'<path d="m9 18 6-6-6-6"/>',
+'chevrons-right':'<path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/>',
+'arrow-right':'<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+'square-arrow-out-up-right':'<path d="M21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"/><path d="m21 3-9 9"/><path d="M15 3h6v6"/>',
+'locate-fixed':'<line x1="2" x2="5" y1="12" y2="12"/><line x1="19" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="5"/><line x1="12" x2="12" y1="19" y2="22"/><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/>',
+'crosshair':'<circle cx="12" cy="12" r="10"/><line x1="22" x2="18" y1="12" y2="12"/><line x1="6" x2="2" y1="12" y2="12"/><line x1="12" x2="12" y1="6" y2="2"/><line x1="12" x2="12" y1="22" y2="18"/>',
+'map-pin':'<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>'};
+const svg=n=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${I[n]}</svg>`;
+const G={retry:['refresh-cw','rotate-cw','refresh-ccw','redo-2','repeat-2'],add:['plus','circle-plus','square-plus','list-plus'],go:['chevron-right','chevrons-right','arrow-right','square-arrow-out-up-right','locate-fixed','crosshair','map-pin']};
+const L={retry:'Retry',add:'Add',go:'Go'};const cur={x:'x',q:'circle-help',retry:'repeat-2',add:'square-plus',go:'square-arrow-out-up-right'};
+const pick=document.getElementById('pick');
+function draw(){document.querySelectorAll('i[data-k]').forEach(e=>e.innerHTML=svg(cur[e.dataset.k]));
+ pick.innerHTML=`<div class="pr"><b>Theme</b>${['original','github'].map(t=>`<button style="width:auto;padding:0 10px" data-th="${t}" class="${document.body.className=='th-'+t?'on':''}">${t}</button>`).join('')}</div>`+'<div style="color:var(--mut);margin:6px 0 4px">Иконки Lucide — нажми, чтобы примерить:</div>'+Object.keys(G).map(k=>`<div class="pr"><b>${L[k]}</b>${G[k].map(n=>`<button title="${n}" data-k="${k}" data-n="${n}" class="${cur[k]==n?'on':''}">${svg(n)}</button>`).join('')}</div>`).join('');}
+pick.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.th)document.body.className='th-'+b.dataset.th;else cur[b.dataset.k]=b.dataset.n;draw();});
+document.body.className='th-github';
+draw();
+</script>
+</body></html>

@@ -1,0 +1,415 @@
+<!-- raw-html-confirmed -->
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<title>site/* events — схемы</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--row:#1c2129;--line:#2a313c;--tx:#e6edf3;--mut:#8b949e;--acc:#3b82f6;--accbg:#13233d;--warn:#e3a008;--err:#f05252;--ok:#3fb950;--vio:#a78bfa;--viobg:#2a2342}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,Segoe UI,Roboto,sans-serif;padding:24px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:19px;margin:36px 0 6px;border-top:1px solid var(--line);padding-top:24px}
+p.note{color:var(--mut);margin:4px 0 14px;max-width:1180px}
+.grid{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}
+.col{width:380px}
+.phone{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.ev{padding:14px 14px 14px 12px;display:flex;gap:12px;border-bottom:1px solid var(--line)}
+.ev.warn{border-left:3px solid var(--warn)}.ev.err{border-left:3px solid var(--err)}.ev.okb{border-left:3px solid var(--ok)}
+.ic{width:34px;height:34px;border-radius:9px;background:var(--viobg);color:var(--vio);display:grid;place-items:center;flex:none;font-size:16px}
+.body{flex:1;min-width:0}
+.meta{color:var(--mut);font-size:13px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tag{font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px}
+.tag.w{background:#3a2c08;color:var(--warn)}.tag.e{background:#3d1414;color:var(--err)}
+.ttl{font-size:16px;font-weight:600;margin:3px 0 2px}
+.sub{color:var(--mut);font-size:13.5px}
+.box{background:var(--row);border-radius:10px;margin:10px 0 8px;overflow:hidden}
+.r{display:flex;gap:10px;padding:9px 11px;border-top:1px solid var(--line);align-items:center;font-size:14px}
+.r:first-child{border-top:0}
+.r .k{color:var(--mut);width:64px;flex:none;font-size:13px}
+.r .v{flex:1;min-width:0}.r .v small{display:block;color:var(--mut);font-size:12.5px}
+.r .chev{color:var(--mut)}
+.ev2{padding:14px;border-bottom:1px solid var(--line)}
+.ev2.warn{border-left:3px solid var(--warn)}.ev2.err{border-left:3px solid var(--err)}.ev2.okb{border-left:3px solid var(--ok)}.ev2.info{border-left:3px solid var(--line)}
+.tag.i{background:rgba(139,148,158,.15);color:var(--mut)}.tag.o{background:rgba(63,185,80,.15);color:var(--ok)}
+.ev2.okb .k2{width:46px}
+.swr{display:flex;align-items:center;gap:8px;margin:8px 0}.swr .k2{width:46px}.swr .sw{flex:1;margin:0}
+.sw{display:flex;margin:10px 0 8px;font-size:14px}.sw .c{flex:1;min-width:0;padding:8px 11px;line-height:20px}.sw .v small{display:block;color:var(--mut);font-size:12.5px;line-height:17px}
+.sw .from{background:linear-gradient(270deg,rgb(110,38,40),rgba(110,38,40,.35) 55%,rgba(110,38,40,.12));border-radius:calc(var(--rad) - 4px) 0 0 calc(var(--rad) - 4px);clip-path:polygon(0 0,calc(100% - 14px) 0,100% 50%,calc(100% - 14px) 100%,0 100%);padding-right:22px}
+.sw .to{background:linear-gradient(270deg,rgb(28,92,48),rgba(28,92,48,.35) 55%,rgba(28,92,48,.12));border-radius:0 calc(var(--rad) - 4px) calc(var(--rad) - 4px) 0;clip-path:polygon(0 0,100% 0,100% 100%,0 100%,14px 50%);margin-left:-10px;padding-left:24px}
+.hd{display:flex;gap:10px;align-items:center}.hd .ic{width:28px;height:28px;font-size:14px}
+.ev2 .ttl{margin:8px 0 0}
+.k2{color:var(--mut);font-size:13px;flex:none;width:38px}
+.ai{margin-right:12px}
+.ai{width:26px;height:26px;border-radius:7px;flex:none;background:linear-gradient(135deg,#fff,#d9d4ff)}
+.act{color:#60a5fa}
+.r .chev{width:12px;text-align:center}
+.nd{display:block;font-size:14px;color:var(--tx);position:relative;padding-left:15px;margin-top:2px}
+.nd::before{content:"";position:absolute;left:3px;top:-3px;width:7px;height:11px;border-left:1.5px solid var(--mut);border-bottom:1.5px solid var(--mut);border-bottom-left-radius:3px}
+.r .st,.r .rb{width:22px;flex:none;display:grid;place-items:center}
+.st svg{width:18px;height:18px}.st.x{color:var(--err)}.st.q{color:var(--mut)}
+.r .rb{margin-right:-2px}
+.r{padding:10px 11px}
+.r .chev,.r .go,.r .rb{display:flex;align-items:center;justify-content:center;height:20px}
+.r .chev i,.r .go i,.r .rb i{display:flex}.r .chev svg,.r .go svg,.r .rb svg{display:block}
+.r.sp{padding:0;align-items:stretch;gap:0}
+.main{flex:1;display:flex;gap:10px;align-items:center;padding:10px 11px;min-width:0}
+.main.bad{background:linear-gradient(90deg,rgb(110,38,40),rgba(110,38,40,.45) 45%,rgba(110,38,40,0) 85%)}
+.main.ok{background:linear-gradient(90deg,rgb(28,92,48),rgba(28,92,48,.45) 45%,rgba(28,92,48,0) 85%)}
+/* app themes (design/src/css/00-themes.css): phone = surface, rows = card-hi */
+:root{--err-rgb:240,82,82;--ok-rgb:63,185,80;--acc-rgb:59,130,246;--rad:14px}
+body.th-original{--bg:#0B0F1A;--card:#131929;--row:#1A2035;--line:#252D45;--tx:#D4DEFF;--mut:#7B8EC8;--acc:#4F8EFF;--acc-rgb:79,142,255;--warn:#F0A040;--err:#F05060;--err-rgb:240,80,96;--ok:#00C896;--ok-rgb:0,200,150;--rad:14px}
+body.th-github{--bg:#0D1117;--card:#161B22;--row:#1C2128;--line:#30363D;--tx:#E6EDF3;--mut:#8B949E;--acc:#2F81F7;--acc-rgb:47,129,247;--warn:#D29922;--err:#F85149;--err-rgb:248,81,73;--ok:#3FB950;--ok-rgb:63,185,80;--rad:8px}
+body[class^="th-"] .phone{border-radius:var(--rad)}
+body[class^="th-"] .box{border-radius:calc(var(--rad) - 4px)}
+body[class^="th-"] .b,body[class^="th-"] .rb,body[class^="th-"] .r .chev,body[class^="th-"] .r .go,body[class^="th-"] .act{color:var(--acc)}
+body[class^="th-"] .b{background:rgba(var(--acc-rgb),.15);border-radius:calc(var(--rad) - 6px)}
+body[class^="th-"] .tag.w{background:rgba(210,153,34,.15);color:var(--warn)}
+body[class^="th-"] .ev2.warn{border-left-color:var(--warn)}
+body[class^="th-"] .menu{background:var(--row);border-radius:var(--rad)}
+body[class^="th-"] .menu .mi.lk{color:var(--acc)}
+.r.sp .sep{margin:0}.r.sp .go{height:auto;width:44px}
+.r .v{line-height:20px}.r .v small{line-height:17px}
+.rb i,.go i,.chev i{display:inline-flex}.rb svg,.go svg,.chev svg{width:18px;height:18px;vertical-align:middle}
+.rb{color:#60a5fa}.r .chev,.r .go{color:#60a5fa;width:22px;flex:none;text-align:center}
+.pick{background:#11161d;border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:14px;font-size:13px}
+.pick .pr{display:flex;align-items:center;gap:6px;padding:3px 0}.pick .pr b{width:46px;color:var(--mut);font-weight:600}
+.pick button{background:var(--row);border:1px solid var(--line);color:#c9d1d9;border-radius:7px;width:32px;height:30px;cursor:pointer;display:grid;place-items:center;padding:0}
+.pick button.on{border-color:var(--acc);background:var(--accbg);color:#60a5fa}.pick svg{width:18px;height:18px}
+.rd{display:flex;gap:10px;align-items:center;cursor:pointer}
+.ro{width:18px;height:18px;flex:none;display:block;color:var(--mut)}.ro svg{display:block;width:18px;height:18px}.ro .dot{display:none}
+.rd.on .ro{color:var(--acc)}.rd.on .ro .dot{display:inline}
+.rb{color:#60a5fa;font-size:18px;width:26px;text-align:center;flex:none}
+.sep{width:1px;align-self:stretch;background:var(--line);margin:-9px 0}
+.go{color:var(--mut);width:22px;text-align:center;flex:none;font-size:16px}
+.menu{background:#202733;border:1px solid var(--line);border-radius:10px;margin-top:6px;overflow:hidden;width:290px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.menu .mi{padding:10px 12px;border-top:1px solid var(--line);font-size:14px}.menu .mi:first-child{border-top:0}
+.menu .mi small{display:block;color:var(--mut);font-size:12.5px}
+.menu .mi.lk{color:#60a5fa}
+.mk{font-size:11px;padding:1px 6px;border-radius:4px;background:#24303f;color:#9fb4cc;margin-left:6px;white-space:nowrap}
+.mk.ok{background:#14301c;color:var(--ok)}
+.sec{color:var(--mut);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;padding:8px 11px 4px;background:var(--card)}
+.x{color:var(--err);font-weight:700;width:16px;text-align:center}.q{color:var(--mut);width:16px;text-align:center}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.b{background:var(--accbg);color:#60a5fa;border-radius:8px;padding:6px 12px;font-size:14px}
+.b.p{background:var(--acc);color:#fff}
+.cause{font-size:13.5px;margin-top:6px;color:var(--mut)}.cause b{color:var(--tx)}
+.chain{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;color:#c9d1d9}
+.crit{background:#11161d;border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:13.5px;color:#c9d1d9;margin-top:10px}
+.crit ul{margin:4px 0 0;padding-left:18px}.crit li{margin:2px 0}
+.lbl{font-size:12px;font-weight:700;color:var(--acc);margin:0 0 6px}
+.bad-lbl{color:var(--err)}
+code{background:#1f2630;padding:0 4px;border-radius:4px;font-size:12.5px}
+.nf{color:var(--warn)}.newf{color:var(--warn);font-weight:600}
+.shots img{display:block;margin-bottom:8px;border-radius:8px}
+.raw{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:#c9d1d9;background:#11161d;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:8px 0;white-space:pre-wrap;word-break:break-all}
+.ba{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start;margin:0 0 18px}
+.ba>.full{grid-column:1/-1}
+.ba>div{min-width:0}
+.ba .phone{width:auto;max-width:380px}
+.ba .none{color:var(--mut);font-size:13px;padding:10px;border:1px dashed rgba(255,255,255,.18);border-radius:8px}
+.ba img{max-width:100%}
+.ba .menu{width:auto;max-width:290px}
+</style></head><body>
+
+<h1>Схемы: события сайтов — site/unreachable и site/blocked</h1>
+<p class="note">Тексты UI на английском (как в приложении), пояснения — на русском. Данные со скринов 24.10 (19:28 и 23:30).</p>
+
+<h2>1. Карточка «сайт не открывается»</h2>
+<p class="note">Что сейчас путает: два ряда <b>Rule</b> с разным смыслом. Первый — по какому правилу трафик реально шёл. Второй («New rule for …») — вообще не правило, а <b>действие</b>: открыть форму нового правила приложения (<code>_appRuleRow</code>, event_text.dart). Плюс заголовок «through any server», хотя проверили две ноды и чекер, а «The checker did not answer» висит отдельной строкой без статуса.</p>
+
+<div class="pick" id="pick"></div>
+<div class="ba">
+<div>
+<div class="lbl bad-lbl">СЕЙЧАС</div>
+<div class="phone">
+ <div class="ev warn"><div class="ic">🌐</div><div class="body">
+  <div class="meta">19:28 <span class="tag w">WARN</span> ×2 · ☾ background</div>
+  <div class="ttl">api64.ipify.org does not open through any server</div>
+  <div class="box">
+   <div class="r"><span class="k">Rule</span><span class="v">None — main flow<small>Proxy</small></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k">App</span><span class="v">Digital Clock and Weather</span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k">Rule</span><span class="v">New rule for api64.ipify.org</span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="q">⚠</span><span class="v">remna<small>RU-SPB ➜ Нидерланды · REALITY</small></span><span class="b">Open</span></div>
+   <div class="r"><span class="q">⚠</span><span class="v">remna<small>RU-SPB ➜ Германия · HY2</small></span><span class="b">Open</span></div>
+   <div class="r"><span class="v">The checker did not answer</span></div>
+  </div>
+  <div class="cause">Cause not established — see the checks</div>
+  <div class="btns"><span class="b">Ignore site</span><span class="b">Check again</span><span class="b">Check with checker</span></div>
+ </div></div>
+</div>
+</div>
+
+<div>
+<div class="lbl">ВАРИАНТ A2 — по правкам (правила для сайта нет)</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">🌐</div><div class="meta">19:28 <span class="tag w">WARN</span> ×2 · ☾ background</div></div>
+  <div class="ttl">api64.ipify.org did not open on 2 servers</div>
+  <div class="box">
+   <div class="r"><img class="ai" alt=""><span class="v">Digital Clock and Weather<small>no own route</small></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">Rule</span><span class="v act">Create api64.ipify.org rule</span><span class="chev ad"><i data-k="add"></i></span></div>
+   <div class="r"><span class="k2">Route</span><span class="v">remna · REALITY<span class="nd">RU-SPB ➜ Нидерланды</span></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="sec">Checked</div>
+   <div class="r sp"><div class="main bad"><span class="rb"><i data-k="retry"></i></span><span class="v">remna · HY2<span class="nd">RU-SPB ➜ Германия</span></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
+   <div class="r sp"><div class="main bad"><span class="rb"><i data-k="retry"></i></span><span class="v">check-host.net · HTTP<span class="nd">no answer in 20 s · via tunnel</span></span></div></div>
+  </div>
+  <div class="cause">Cause: <b>not established</b> — the site may be down itself</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">Ignore site ▾</span></div>
+ </div>
+</div>
+</div>
+</div>
+<div class="ba">
+<div>
+<div class="crit" style="margin-top:0"><ul>
+ <li>Route и серверы в Checked — одним видом: «подписка · протокол», под ней «└ нода».</li>
+ <li>Checker: тап в любом месте ряда — перепроверка чекером, ↻ справа как подсказка. «Check again» убран.</li>
+ <li>Сервер в Checked: тап по ряду (или ↻) — перепроверка через эту ноду; за разделителем › — переход в Routes к ноде (моргнёт 2 раза, Back — обратно к событию).</li>
+ <li>Rule: подпись «&lt;route&gt;: &lt;цель&gt;», цель — main flow / подписка / нода: «Proxy: main flow», «Proxy: remna», «Proxy: RU-SPB ➜ Германия».</li>
+ <li>Тап по карточке больше ничего не открывает; Details ▾ рядом с Ignore site разворачивает само событие (Why / Raw), как раньше тап.</li>
+ <li>Ignore site — дропдаун: «везде» / «только на этом маршруте» (фича из <code>features.md</code>, подтверждена 2026-10-14) + ссылка на список.</li>
+ <li>Отступы: иконка в строке времени, блок данных во всю ширину; подписи Rule/Route — узкая колонка.</li>
+</ul></div>
+</div>
+<div>
+<div class="lbl">ТО ЖЕ — правило для сайта уже есть, чекер сайт открыл</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">🌐</div><div class="meta">19:28 <span class="tag w">WARN</span> ×2 · ☾ background</div></div>
+  <div class="ttl">api64.ipify.org did not open on 2 servers</div>
+  <div class="box">
+   <div class="r"><img class="ai" alt=""><span class="v">Digital Clock and Weather</span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">Rule</span><span class="v">api64.ipify.org rule<small>Proxy: remna</small></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">Route</span><span class="v">remna · REALITY<span class="nd">RU-SPB ➜ Нидерланды</span></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="sec">Checked</div>
+   <div class="r sp"><div class="main bad"><span class="rb"><i data-k="retry"></i></span><span class="v">remna · HY2<span class="nd">RU-SPB ➜ Германия</span></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
+   <div class="r sp"><div class="main ok"><span class="rb"><i data-k="retry"></i></span><span class="v">check-host.net · HTTP<span class="nd">opens on 6 of 8 nodes · via tunnel</span></span></div></div>
+  </div>
+  <div class="cause">Cause: <b>not established</b> — the site may be down itself</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">Ignore site ▾</span></div>
+ </div>
+</div>
+<div class="lbl" style="margin-top:18px">Ignore site ▾ — открытый дропдаун</div>
+<div class="menu" id="ign">
+ <div class="mi rd on" data-v="all"><span class="ro"></span><span>Everywhere<small>no events for api64.ipify.org on any route; rarely re-checked to notice it is back</small></span></div>
+ <div class="mi rd" data-v="route"><span class="ro"></span><span>On this route only<small>remna · RU-SPB ➜ Нидерланды<br>other routes still checked</small></span></div>
+ <div class="mi lk">Ignored sites…</div>
+</div>
+</div>
+</div>
+
+<h2>2. <code>site/blocked</code> — не открывается через маршрут, открывается через другой</h2>
+<p class="note">Сейчас: заголовок называет упавший маршрут, детали склеены в одну строку («Through … it opens», «No rule, main flow»), кнопки Create rule / Ignore site плоские. Поля: <code>entry / server</code> (упавший), <code>via / viaServer</code> (открывший), <code>host</code>, приложение, <code>why</code>.</p>
+<div class="ba">
+<div class="shots">
+<div class="lbl bad-lbl">СЕЙЧАС (site_12: тост + уведомление)</div>
+<img src="../app/build/event_shots/site_12.png" style="width:380px">
+</div>
+<div>
+<div class="lbl">НОВОЕ — правила для сайта нет</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">🌐</div><div class="meta">02:58 <span class="tag w">WARN</span> ×2 · Firefox, Chrome</div></div>
+  <div class="ttl">video.example.net opens only through Amsterdam 2</div>
+  <div class="box">
+   <div class="r"><img class="ai" alt=""><span class="v">Firefox<small>no own route</small></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">Rule</span><span class="v act">Create video.example.net rule<small>Fallback will be the route that opened it</small></span><span class="chev ad"><i data-k="add"></i></span></div>
+   <div class="r"><span class="k2">Route</span><span class="v">Remnawave · REALITY<span class="nd">Frankfurt 1</span></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="sec">Checked</div>
+   <div class="r sp"><div class="main ok"><span class="rb"><i data-k="retry"></i></span><span class="v">Remnawave · HY2<span class="nd">Amsterdam 2 · opens in 410 ms</span></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
+  </div>
+  <div class="cause">Cause: <b>Frankfurt 1</b> — the same site opens through Amsterdam 2, so the server or its way to the site is blocked</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">Ignore site ▾</span></div>
+ </div>
+</div>
+</div>
+</div>
+<div class="ba">
+<div>
+<div class="crit" style="margin-top:0"><div class="lbl">Предложения</div><ul>
+ <li><b>Заголовок: «opens only through Amsterdam 2».</b> Сейчас он называет сломанный маршрут; главное для пользователя — что работает. Имя ноды в заголовке (одна, короткая часть), подписка — в рядах. Без стрелок-цепочек «нода › нода» — имена длинные.</li>
+ <li><b>Route = упавший, Checked = открывший (зелёный ряд).</b> Та же логика, что в site/unreachable: исходный маршрут в Checked не повторяется. Зелёный градиент вместо слов «it opens»; ↻ слева — перепроверить сайт через эту ноду (заменяет «Check again»), › справа — к ноде в Routes.</li>
+ <li><b>«Create video.example.net rule» остаётся рядом с приложением, форма с Fallback = маршрут, открывший сайт</b> (<code>via</code> / <code>viaServer</code>) — как в согласованной спеке; малая подпись говорит, что предзаполнится. Если правило есть — «video.example.net rule» + «Proxy: …».</li>
+ <li><b>Приложение — без подписи «App»</b>; «no own route» малым, если у приложения нет своего маршрута (то же, что в unreachable). Несколько приложений (×N) — «Firefox, Chrome» в шапке, в ряду — первое + «and 1 more» (тап — лист приложений).</li>
+ <li><b>Cause одной строкой</b> вместо склейки <code>whyText</code>: сервер, который не открывает, и что это значит. Если Sentinel знает причину (<code>why</code>: смена сети и т.п.) — она в Cause.</li>
+ <li><b>Кнопки:</b> Details ▾ (Why / Raw) первая, Ignore site ▾ (Everywhere / On this route only). «Create rule» из кнопок уходит в ряд Rule; Check again нет.</li>
+ <li><span class="nf">нужно новое поле:</span> время открытия через <code>via</code> («opens in 410 ms») — опционально; без него подпись «opens through this server».</li>
+</ul></div>
+</div>
+<div>
+<div class="lbl">ТО ЖЕ — правило уже есть (через нужный маршрут не идёт)</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">🌐</div><div class="meta">02:58 <span class="tag w">WARN</span></div></div>
+  <div class="ttl">video.example.net opens only through Amsterdam 2</div>
+  <div class="box">
+   <div class="r"><img class="ai" alt=""><span class="v">Firefox</span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">Rule</span><span class="v">video.example.net rule<small>Proxy: Remnawave · Frankfurt 1</small></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">Route</span><span class="v">Remnawave · REALITY<span class="nd">Frankfurt 1</span></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="sec">Checked</div>
+   <div class="r sp"><div class="main ok"><span class="rb"><i data-k="retry"></i></span><span class="v">Remnawave · HY2<span class="nd">Amsterdam 2 · opens in 410 ms</span></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
+  </div>
+  <div class="cause">Cause: <b>Frankfurt 1</b> — the rule sends the site through it; Amsterdam 2 opens it</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">Ignore site ▾</span></div>
+ </div>
+</div>
+</div>
+</div>
+
+<!-- ============ 2. conn/connectFailed ============ -->
+<h2>3. <code>site/blocked</code>: «не открывается через X, открывается через X»</h2>
+<p class="note">Событие (<code>logs.md:110</code>): <code>{host, entry, server, dest, via, viaServer, viaTarget?, rule, …}</code>. <code>server</code> — нода, на которой соединение упало; <code>via</code> — нода, где сайт открылся (разведчик: рабочая нода той же подписки, другой страны, затем ноды других подписок); <code>viaTarget: 'node:…'</code> — только если открывшая нода это цель правила. Оба поля при записи приводятся из сырого тега sing-box (<code>route0/src2::n…</code>, <code>chain:…</code>) к ключу <code>sid::nid</code>, а имя ищется при показе (<code>connect-model.md:975-981</code>, «Строка ноды в событии»).</p>
+
+<div class="ba">
+<div>
+<div class="lbl bad-lbl">СЕЙЧАС — как читалось (старый вид, баг до правки показа)</div>
+<div class="phone">
+ <div class="ev warn"><div class="ic">🌐</div><div class="body">
+  <div class="meta">19:14 <span class="tag w">WARN</span></div>
+  <div class="ttl">network-lc.ru does not open through Нидерланды — opens through Нидерланды</div>
+  <div class="box">
+   <div class="r"><span class="q">⚠</span><span class="v">remna<small>RU-SPB ➜ Нидерланды · REALITY</small></span><span class="b">Open</span></div>
+   <div class="r"><span class="q">✅</span><span class="v">remna<small>RU-SPB ➜ Нидерланды · REALITY</small></span><span class="b">Open</span></div>
+  </div>
+  <div class="btns"><span class="b">Check again</span><span class="b">Create rule</span></div>
+ </div></div>
+</div>
+<div class="lbl" style="margin-top:14px">Что лежит в данных (реальный репорт-пример)</div>
+<div class="raw">server: "route0/src2::n518c…"   // сырой тег sing-box
+via:    "route0-entry/src2::n518c…" // тоже тег, другой префикс
+viaTarget: "node:src2::n518c…"
+tried: [ {node: "src2::n9a3f…", opens: true}, … ]</div>
+</div>
+
+<div>
+<div class="lbl">Как это читается в новом стиле — мини-карточка (не новый дизайн site/blocked)</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">🌐</div><div class="meta">19:14 <span class="tag w">WARN</span></div></div>
+  <div class="ttl">network-lc.ru does not open on this server</div>
+  <div class="box">
+   <div class="r"><span class="k2">Route</span><span class="v">remna · REALITY<span class="nd">RU-SPB ➜ Нидерланды</span></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="sec">Opens through</div>
+   <div class="r sp"><div class="main ok"><span class="v">remna · HY2<span class="nd">RU-SPB ➜ Германия</span></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
+  </div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">Create rule</span></div>
+ </div>
+</div>
+</div>
+</div>
+<div class="ba">
+<div>
+<div class="crit" style="margin-top:0"><ul>
+ <li><b>Откуда путаница.</b> Событие хранило <code>server</code> и <code>via</code> как <b>сырые теги</b> sing-box. У одной и той же ноды тег зависит от того, кто его назвал: <code>route0/src2::n518c…</code> (исходящее маршрута), <code>route0-entry/…</code> (вход цепочки), <code>chain:…</code>. Приложение при показе доставало «имя» из тега и для обоих тегов получало одну и ту же ноду; протокол брался по ключу и совпадал. Два <b>разных тега одной ноды</b> выглядели как две строки с одинаковым именем: «не открывается через X — открывается через X».</li>
+ <li><b>Что починено (2026-10-20).</b> Тег приводится к ключу <code>sid::nid</code> одной функцией «тег → ключ ноды» и при записи события, и при показе (уже сохранённые события тоже); показывается имя + протокол. В репорте <code>20261019-oiep7x</code> ноды разошлись: NL не открывает, Германия открывает — то есть данные были верны, путала только подача.</li>
+ <li><b>Остаток.</b> Если после исправления <code>server</code> и <code>via</code> дают <b>один</b> ключ, такого события быть не должно: <code>via</code> — всегда <i>другая</i> нода. Защита: ядро не пишет <code>via</code>, равный <code>server</code> (считать «не нашли»); приложение не рисует два одинаковых ряда. <span class="newf">Нужно проверить в ядре (не в схеме)</span>, где при записи <code>via</code> сравнивается с <code>server</code>.</li>
+ <li><b>Ожидание следующего репорта:</b> Fazhzcezbdi.interkh.com (из bugs.md).</li>
+ <li><b>Открытый вопрос (bugs.md):</b> почему поздние <code>site/unreachable</code> не пробовали <code>n518c…</code> — это <b>цель правила</b> (<code>viaTarget</code>), а не основной маршрут. Гипотеза: лестница «tried» берёт ноды подписок и разведчика, а ноду-цель правила пропускает как «уже известную» из <code>blocked</code>; в <code>unreachable</code> её нет ни в <code>tried</code>, ни в Checked, хотя именно она открывала сайт ранее. Нужно ядро: сверить <code>tried</code> позднего <code>unreachable</code> с <code>viaTarget</code> первого <code>blocked</code>.</li>
+ <li>В новом виде: строка Route — маршрут, где упало; «Opens through» — только узел с зелёной подсветкой и переход к нему; тап по карточке ничего не делает.</li>
+</ul></div>
+</div>
+<div>
+<div class="lbl">Если ключи совпали (тот же узел дважды) — так читать нельзя, это баг данных</div>
+<div class="phone">
+ <div class="ev2 err">
+  <div class="hd"><div class="ic">🌐</div><div class="meta">19:14 <span class="tag e">ERROR</span></div></div>
+  <div class="ttl">network-lc.ru — same server in both rows</div>
+  <div class="box">
+   <div class="r sp"><div class="main bad"><span class="v">remna · REALITY<span class="nd">RU-SPB ➜ Нидерланды</span></span></div></div>
+   <div class="r sp"><div class="main ok"><span class="v">remna · REALITY<span class="nd">RU-SPB ➜ Нидерланды</span></span></div></div>
+  </div>
+ </div>
+</div>
+</div>
+
+</div>
+
+<!-- ============ 3. dns/failed, failedOnNode ============ -->
+<h2>4. Сравнение: <code>site/unreachable</code> и <code>site/blocked</code> — одна карточка</h2>
+<p class="note">В новом виде карточки совпадают ряд в ряд: приложение, Rule, Route, Checked, Cause, кнопки. Отличается только итог проверки — есть ли в Checked зелёный ряд. Ниже обе в одном шаблоне рядом.</p>
+<div class="ba">
+<div></div>
+<div>
+<div class="lbl">unreachable — не открылся нигде</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">🌐</div><div class="meta">19:28 <span class="tag w">WARN</span> ×2 · ☾ background</div></div>
+  <div class="ttl">api64.ipify.org did not open on 2 servers</div>
+  <div class="box">
+   <div class="r"><img class="ai" alt=""><span class="v">Digital Clock and Weather<small>no own route</small></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">Rule</span><span class="v act">Create api64.ipify.org rule</span><span class="chev ad"><i data-k="add"></i></span></div>
+   <div class="r"><span class="k2">Route</span><span class="v">remna · REALITY<span class="nd">RU-SPB ➜ Нидерланды</span></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="sec">Checked</div>
+   <div class="r sp"><div class="main bad"><span class="rb"><i data-k="retry"></i></span><span class="v">remna · HY2<span class="nd">RU-SPB ➜ Германия</span></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
+   <div class="r sp"><div class="main bad"><span class="rb"><i data-k="retry"></i></span><span class="v">check-host.net · HTTP<span class="nd">no answer in 20 s · via tunnel</span></span></div></div>
+  </div>
+  <div class="cause">Cause: <b>not established</b> — the site may be down itself</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">Ignore site ▾</span></div>
+ </div>
+</div>
+</div>
+</div>
+<div class="ba">
+<div>
+<div class="crit" style="margin-top:0"><ul>
+ <li><b>Вывод:</b> это не дубли, а два разных вердикта одной проверки. <code>blocked</code> — сайт закрыт на этом маршруте, есть рабочий; <code>unreachable</code> — рабочего не нашли (сайт лежит или закрыт везде, где пробовали).</li>
+ <li><b>Что от вердикта зависит</b> (поэтому типов два): уведомление и его кнопки; предзаполнение правила — Fallback = открывший маршрут есть только у blocked; подсказка в Cause; срок игнора отвалов у мёртвого сайта (90 мин, <code>failures.md</code>).</li>
+ <li><b>Предложение:</b> типы оставить, карточку — одну. Заголовок по одной формуле: «did not open on N servers» / «did not open on K of N servers». Вариант агента «opens only through X» из прошлой схемы (§2) — заменить на эту формулу.</li>
+ <li>Чекер в N не входит: он отдельный ряд Checked и говорит, открывается ли сайт у других.</li>
+ <li>Rule у blocked малым показывает, куда пойдёт Fallback нового правила; у unreachable малой строки нет (открывшего маршрута нет — Fallback Default).</li>
+</ul></div>
+</div>
+<div>
+<div class="lbl">blocked — открылся через другой маршрут</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">🌐</div><div class="meta">19:28 <span class="tag w">WARN</span> ×2 · ☾ background</div></div>
+  <div class="ttl">api64.ipify.org did not open on 1 of 2 servers</div>
+  <div class="box">
+   <div class="r"><img class="ai" alt=""><span class="v">Digital Clock and Weather<small>no own route</small></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="r"><span class="k2">Rule</span><span class="v act">Create api64.ipify.org rule<small>Fallback: RU-SPB ➜ Германия</small></span><span class="chev ad"><i data-k="add"></i></span></div>
+   <div class="r"><span class="k2">Route</span><span class="v">remna · REALITY<span class="nd">RU-SPB ➜ Нидерланды</span></span><span class="chev"><i data-k="go"></i></span></div>
+   <div class="sec">Checked</div>
+   <div class="r sp"><div class="main ok"><span class="rb"><i data-k="retry"></i></span><span class="v">remna · HY2<span class="nd">RU-SPB ➜ Германия · opens in 410 ms</span></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
+  </div>
+  <div class="cause">Cause: <b>RU-SPB ➜ Нидерланды</b> — the site opens through another server</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">Ignore site ▾</span></div>
+ </div>
+</div>
+</div>
+</div>
+<h2 style="font-size:16px">Открытые вопросы</h2>
+<div class="crit" style="max-width:1180px"><ul>
+ <li><b>Карточка сайта:</b> A (три блока, всё открывается) или B (компакт, путь строкой, детали в «why»)?</li>
+ <li><b>Кнопка вместо «New rule for …»:</b> правило только для этого приложения или общее для сайта?</li>
+</ul></div>
+<script>
+const I={
+'refresh-cw':'<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+'rotate-cw':'<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
+'refresh-ccw':'<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/>',
+'redo-2':'<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/>',
+'repeat-2':'<path d="m2 9 3-3 3 3"/><path d="M13 18H7a2 2 0 0 1-2-2V6"/><path d="m22 15-3 3-3-3"/><path d="M11 6h6a2 2 0 0 1 2 2v10"/>',
+'x':'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+'circle-help':'<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+'plus':'<path d="M5 12h14"/><path d="M12 5v14"/>',
+'circle-plus':'<circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/>',
+'square-plus':'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M8 12h8"/><path d="M12 8v8"/>',
+'list-plus':'<path d="M16 5H3"/><path d="M11 12H3"/><path d="M16 19H3"/><path d="M18 9v6"/><path d="M21 12h-6"/>',
+'chevron-right':'<path d="m9 18 6-6-6-6"/>',
+'chevrons-right':'<path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/>',
+'arrow-right':'<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+'square-arrow-out-up-right':'<path d="M21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"/><path d="m21 3-9 9"/><path d="M15 3h6v6"/>',
+'locate-fixed':'<line x1="2" x2="5" y1="12" y2="12"/><line x1="19" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="5"/><line x1="12" x2="12" y1="19" y2="22"/><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/>',
+'crosshair':'<circle cx="12" cy="12" r="10"/><line x1="22" x2="18" y1="12" y2="12"/><line x1="6" x2="2" y1="12" y2="12"/><line x1="12" x2="12" y1="6" y2="2"/><line x1="12" x2="12" y1="22" y2="18"/>',
+'map-pin':'<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>'};
+const svg=n=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${I[n]}</svg>`;
+const G={retry:['refresh-cw','rotate-cw','refresh-ccw','redo-2','repeat-2'],add:['plus','circle-plus','square-plus','list-plus'],go:['chevron-right','chevrons-right','arrow-right','square-arrow-out-up-right','locate-fixed','crosshair','map-pin']};
+const L={retry:'Retry',add:'Add',go:'Go'};const cur={x:'x',q:'circle-help',retry:'repeat-2',add:'square-plus',go:'square-arrow-out-up-right'};
+const pick=document.getElementById('pick');
+function draw(){document.querySelectorAll('i[data-k]').forEach(e=>e.innerHTML=svg(cur[e.dataset.k]));
+ pick.innerHTML=`<div class="pr"><b>Theme</b>${['original','github'].map(t=>`<button style="width:auto;padding:0 10px" data-th="${t}" class="${document.body.className=='th-'+t?'on':''}">${t}</button>`).join('')}</div>`+'<div style="color:var(--mut);margin:6px 0 4px">Иконки Lucide — нажми, чтобы примерить:</div>'+Object.keys(G).map(k=>`<div class="pr"><b>${L[k]}</b>${G[k].map(n=>`<button title="${n}" data-k="${k}" data-n="${n}" class="${cur[k]==n?'on':''}">${svg(n)}</button>`).join('')}</div>`).join('');}
+pick.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.th)document.body.className='th-'+b.dataset.th;else cur[b.dataset.k]=b.dataset.n;draw();});
+document.body.className='th-github';
+document.getElementById('ign').addEventListener('click',e=>{const r=e.target.closest('.rd');if(!r)return;const was=r.classList.contains('on');document.querySelectorAll('#ign .rd').forEach(x=>x.classList.remove('on'));if(!was)r.classList.add('on');});
+document.querySelectorAll(".ro").forEach(e=>e.innerHTML=`<svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="8" fill="none" stroke="currentColor" stroke-width="2"/><circle class="dot" cx="9" cy="9" r="4" fill="currentColor"/></svg>`);
+draw();
+</script>
+</body></html>

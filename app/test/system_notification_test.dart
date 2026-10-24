@@ -574,7 +574,7 @@ void main() {
         'subFailed': ('sub', 'failed'),
         'ruleSets': ('rules', 'ruleSetFailed'),
         'appData': ('core', 'stateLost'),
-        'dnsFailed': ('dns', 'failed'),
+        'dnsFailed': ('dns', 'down'),
       };
       // how many notifications the kind's event makes now, in the background
       // `sub/updated` is the subUpdated kind only at info; at warn it is the subFailed kind

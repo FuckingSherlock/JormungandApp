@@ -1171,8 +1171,8 @@ Global, hijack вкл / выкл, системные правила первым
   После каждой записи спрашивается **flagcheck** стороны (`probeFlag`, `rules.md` §6): sing-box подхватил файл или
   предупреждение. Сервис (`CoreService`) держит память флагов (`_dnsFlagMemory`: id → включён) и применяет её после
   любого перезапуска sing-box, а не берёт из файлов; пользовательское подключение и отключение память
-  сбрасывают, `adopt` начинает с включённых. `dns/switched` — на сторону, `dns/failed` — на провайдера и сторону
-  (`logs.md`). `status.dns` = `{active, auto, sides, servers}` (`rules.md` §6, «UI»). Не судит, пока статус
+  сбрасывают, `adopt` начинает с включённых. События — `dns/switched`, `dns/transport`, `dns/down` / `dns/up`
+  (`logs.md` → «DNS-события: состав и карточки»). `status.dns` = `{active, auto, sides, servers}` (`rules.md` §6, «UI»). Не судит, пока статус
   сети пула не `up`; ответы DNS статус не питают.
   Проверка сервера — `probeDns` (`probe.dart`): SOCKS-запрос в probe
   inbound с пользователем `dns-check/<тег>`; для него в конфиге правило `resolve` с явным

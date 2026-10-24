@@ -41,6 +41,7 @@ class _Rig {
     DnsVerdictBook? verdicts,
     this.nodeId,
     bool withNodes = false,
+    Map<String, String> names = const {},
   }) {
     this.verdicts = verdicts ?? DnsVerdictBook();
     this.uncertain = uncertain;
@@ -103,8 +104,14 @@ class _Rig {
       note: (level, line) => notes.add('$level $line'),
       flagWait: const Duration(milliseconds: 30),
       flagPoll: Duration.zero,
+      nameOf: (provider) => names[provider] ?? '', // the display name of Settings → DNS; empty = the id
     );
-    svc.switches.listen(switches.add);
+    svc.switches.listen((s) => switches.add(s.toJson()));
+    svc.transports.listen((t) => transports.add(t.toJson()));
+    svc.outages.listen((o) {
+      final j = o.toJson();
+      (j.containsKey('afterMs') ? ups : downs).add(j);
+    });
   }
 
   final time = FakeTime();
@@ -132,7 +139,12 @@ class _Rig {
   final checks = <String>[];
   final notes = <String>[];
   final asked = <String>[];
-  final switches = <DnsSwitch>[];
+  /// What the three streams carried, as the contract JSON (`toJson()`): [switches] (DnsSwitch), [transports]
+  /// (a transport change of one provider), [downs] / [ups] (the two kinds of `outages`).
+  final switches = <Map>[];
+  final transports = <Map>[];
+  final downs = <Map>[];
+  final ups = <Map>[];
   Completer<void>? gate;
   final hold = <String, Completer<void>>{};
   bool refuseMode;
@@ -164,12 +176,28 @@ class _Rig {
           if (e['cat'] == 'dns' && e['type'] == type) e,
       ];
 
+  /// One line per side of every switch record: `<side> <from provider>><to provider> <reason>`.
   Future<List<String>> log() async {
     await Future<void>.delayed(Duration.zero);
-    return [for (final s in switches) '${s.side} ${s.from}>${s.to} ${s.reason}'];
+    return [
+      for (final s in switches)
+        for (final x in (s['sides'] as List).cast<Map>()) '${x['side']} ${(x['from'] as Map)['provider']}>${(x['to'] as Map)['provider']} ${s['reason']}',
+    ];
+  }
+
+  /// One line per side of every transport record: `<side> <provider> <from kinds>><to kind>`.
+  Future<List<String>> tlog() async {
+    await Future<void>.delayed(Duration.zero);
+    return [
+      for (final t in transports)
+        for (final x in (t['sides'] as List).cast<Map>()) '${x['side']} ${x['provider']} ${(x['from'] as List).join('+')}>${x['to']}',
+    ];
   }
 
   Future<void> dispose() async {
+    // the invariant of every scenario: the detector no longer writes the verdict events dns/failed, dns/failedOnNode
+    expect(events('failed'), isEmpty, reason: 'dns/failed is not emitted any more');
+    expect(events('failedOnNode'), isEmpty, reason: 'dns/failedOnNode is not emitted any more');
     svc.stop();
     sentinel.dispose();
   }
@@ -190,8 +218,8 @@ void main() {
     rig.svc.stop();
   });
 
-  test('a miss streak is judged by the Sentinel: dns/failed, the flag goes off, the side moves to the highest candidate that answers', () async {
-    final r = _Rig(direct: ['a', 'b', 'c']);
+  test('a miss streak is judged by the Sentinel: the flag goes off, the side moves to the highest candidate that answers (one DnsSwitch with from / to, no dns/failed)', () async {
+    final r = _Rig(direct: ['a', 'b', 'c'], names: {'a': 'Alpha', 'b': 'Beta'});
     await r.settle();
     await r.round();
     expect(r.svc.active, 'a');
@@ -204,16 +232,16 @@ void main() {
     expect(r.svc.active, 'b');
     expect(r.writes, ['a off miss'], reason: 'the verdict only confirms what was done (the flap guard\'s strike)');
     expect(await r.log(), ['direct a>b failover']);
-    expect([r.switches.single.fromProvider, r.switches.single.toProvider], ['a', 'b']);
-    final e = r.events('failed').single;
-    expect([e['level'], e['verdict']], ['warn', 'confirmed']);
-    expect(e['data'], containsPair('server', 'a'));
-    expect(e['data'], containsPair('path', 'direct'));
-    expect(e['data'], containsPair('since', isA<int>()));
-    expect(e['data'], containsPair('provider', 'a'));
-    expect(e['data'], containsPair('side', 'direct'));
-    final codes = [for (final s in (e['trail'] as List).cast<Map>()) '${s['code']}'];
-    expect(codes, containsAllInOrder(['suspect', 'persist.window', 'dns.answers', 'dns.path']));
+    expect(r.switches, hasLength(1), reason: 'the verdict confirming the miss adds no second record');
+    final s = r.switches.single;
+    expect([s['reason'], s['same'], s['at']], ['failover', isA<bool>(), isA<int>()]);
+    final side = (s['sides'] as List).single as Map;
+    expect(side['side'], 'direct');
+    expect(side['from'], {'provider': 'a', 'name': 'Alpha', 'silent': ['udp'], 'since': isA<int>()},
+        reason: 'the server that failed: its Settings name, the transports that were silent and since when');
+    expect(side['to'], {'provider': 'b', 'name': 'Beta', 'kind': 'udp', 'ms': 20}, reason: 'the one that answers: name, transport, ms');
+    expect(r.transports, isEmpty);
+    expect(r.downs, isEmpty, reason: 'there was a spare: not an outage');
     expect(r.sentinel.roots.byKey('dns|a'), isNotNull);
     expect(r.sentinel.roots.byKey('dns|a')!.level, Level.dns);
     expect((r.svc.toJson()['servers'] as List).first, containsPair('ok', false));
@@ -266,7 +294,8 @@ void main() {
       await r.round(2);
     }
     expect(r.svc.active, 'a');
-    expect(r.events('failed'), hasLength(1), reason: 'b is down, written once');
+    expect(r.downs, isEmpty, reason: 'b is a spare that is not selected: no event');
+    expect(r.switches, isEmpty);
     expect(r.writes, ['b off miss']);
     r.alive['dns-a'] = -1;
     for (var i = 0; i < 3; i++) {
@@ -280,6 +309,7 @@ void main() {
     }
     expect(r.writes, hasLength(2), reason: 'a dead side is not flipped again');
     expect(await r.log(), isEmpty, reason: 'the answering server did not change');
+    expect(r.downs, hasLength(1), reason: 'every candidate silent: one DnsDown, not one per round');
     await r.dispose();
   });
 
@@ -296,7 +326,8 @@ void main() {
     expect(r.checks.where((c) => c == 'v2'), isNotEmpty);
     expect(r.checks.where((c) => c == 'a' || c == 'b'), isEmpty, reason: 'only the side that changed is verified');
     expect(await r.log(), ['vpn v1>v2 failover']);
-    expect(r.events('failed').single['data'], containsPair('side', 'vpn'));
+    expect(((r.switches.single['sides'] as List).single as Map)['side'], 'vpn');
+    expect(r.downs, isEmpty);
     await r.dispose();
   });
 
@@ -326,7 +357,9 @@ void main() {
     await r.round(2);
     await r.round(2);
     expect(r.svc.active, 'a');
-    expect(r.events('failed'), hasLength(1));
+    expect(r.downs, hasLength(1), reason: 'nothing to fail over to: DnsDown');
+    expect(r.downs.single['noSpare'], isTrue);
+    expect(r.switches, isEmpty);
     expect(r.checks, isEmpty, reason: 'a single candidate has no flag rule in the config to look at');
     expect(r.svc.toJson()['servers'], [
       {'id': 'a', 'ok': false, 'rechecking': false, 'ms': -1, 'provider': 'a', 'side': 'direct', 'kind': 'udp', 'flag': false},
@@ -343,7 +376,7 @@ void main() {
     expect(r.svc.active, 'a');
     expect(r.writes, isEmpty);
     expect((r.svc.toJson()['servers'] as List).first, containsPair('ok', false));
-    expect(r.events('failed'), hasLength(1), reason: 'the checks and the labels go on');
+    expect(r.sentinel.roots.byKey('dns|a'), isNotNull, reason: 'the checks and the labels go on');
     await r.svc.setAuto(true); // the current verdicts apply at once
     expect(r.svc.active, 'b');
     expect(r.writes, ['a off verdict']);
@@ -450,7 +483,7 @@ void main() {
     expect(r.writes, isEmpty);
     expect(r.verdicts.deadOf(key), isFalse, reason: 'the miss alone changed nothing');
     await r.time.advanceSeconds(3);
-    expect(r.events('failed'), hasLength(1));
+    expect(r.switches, hasLength(1), reason: 'the confirmed server leaves the side: one switch record');
     expect(r.writes, ['a off verdict']);
     expect(r.verdicts.deadOf(key), isTrue);
 
@@ -672,7 +705,8 @@ void main() {
     r.alive['dns-a'] = -1;
     await r.round(3);
     await r.round(3);
-    expect(r.events('failed').single['data'], containsPair('server', 'a'));
+    expect(r.downs, hasLength(1), reason: 'the only direct candidate: its own failure, nowhere to go');
+    expect(((r.downs.single['sides'] as List).single as Map)['side'], 'direct');
     await r.dispose();
   });
 
@@ -682,7 +716,8 @@ void main() {
     r.alive['dns-x'] = -1;
     await r.round(2);
     await r.round(2);
-    expect(r.events('failed').single['data'], containsPair('server', 'x'));
+    expect(r.downs, isEmpty, reason: 'a watched server that is not selected: no event');
+    expect(r.switches, isEmpty);
     expect(r.sentinel.roots.byKey('dns|x'), isNotNull);
     expect(r.svc.active, 'a');
     expect(r.writes, ['x off miss'], reason: 'a rule\'s chain of several transports follows its flag');
@@ -695,7 +730,8 @@ void main() {
     r.alive['local'] = -1;
     await r.round(2);
     await r.round(2);
-    expect(r.events('failed').map((e) => (e['data'] as Map)['server']), containsAll(['x', 'system']));
+    expect(r.sentinel.roots.byKey('dns|system'), isNotNull);
+    expect(r.downs, isEmpty);
     expect(r.writes, ['x off miss'], reason: 'the OS resolver has no flag');
     r.alive['dns-x'] = 10;
     await r.round();
@@ -703,27 +739,35 @@ void main() {
     await r.dispose();
   });
 
-  test('the event is per provider and side: a dead transport whose provider still answers is a log line, the last one makes dns/failed', () async {
-    final r = _Rig(direct: ['p-doh', 'p-dot', 'q'], providers: {'p-doh': 'p', 'p-dot': 'p'});
+  test('the record is per provider and side: a dead transport whose provider still answers is a transport change (a log line, no switch), the last one makes a DnsSwitch', () async {
+    final r = _Rig(
+        direct: ['p-doh', 'p-dot', 'q'],
+        providers: {'p-doh': 'p', 'p-dot': 'p'},
+        kinds: {'p-doh': 'doh', 'p-dot': 'dot'},
+        names: {'p': 'Pee', 'q': 'Que'});
     await r.settle();
     r.alive['dns-p-doh'] = -1;
     await r.round(2);
     await r.round(2);
     expect(r.writes, ['p-doh off miss'], reason: 'the flag follows the transport');
     expect(r.svc.active, 'p-dot');
-    expect(r.events('failed'), isEmpty, reason: 'the provider still answers through p-dot');
+    expect(r.switches, isEmpty, reason: 'the provider still answers through p-dot: not a switch');
+    expect(r.downs, isEmpty);
+    expect(await r.tlog(), ['direct p doh>dot']);
+    final t = r.transports.single;
+    expect(t['same'], isA<bool>());
+    expect((t['sides'] as List).single, {'side': 'direct', 'provider': 'p', 'name': 'Pee', 'from': ['doh'], 'to': 'dot', 'ms': 20});
     expect(r.notes.any((n) => n.contains('p-doh (p, direct) does not answer, its provider still does through p-dot')), isTrue, reason: '${r.notes}');
     r.alive['dns-p-dot'] = -1;
     await r.round(2);
     await r.round(2);
-    final e = r.events('failed').single;
-    expect(e['data'], containsPair('server', 'p-dot'));
-    expect(e['data'], containsPair('provider', 'p'));
-    expect(e['data'], containsPair('side', 'direct'));
-    expect(e['data'], containsPair('servers', ['p-dot', 'p-doh']));
     expect(r.svc.active, 'q');
-    expect(await r.log(), ['direct p-doh>p-dot failover', 'direct p-dot>q failover']);
-    expect([r.switches.last.fromProvider, r.switches.last.toProvider], ['p', 'q']);
+    expect(await r.log(), ['direct p>q failover']);
+    final from = ((r.switches.single['sides'] as List).single as Map)['from'] as Map;
+    expect([from['provider'], from['name']], ['p', 'Pee']);
+    expect(from['silent'], unorderedEquals(['doh', 'dot']), reason: 'every transport of the provider that was silent');
+    expect(((r.switches.single['sides'] as List).single as Map)['to'], containsPair('name', 'Que'));
+    expect(r.transports, hasLength(1), reason: 'the provider leaving is a switch, not a second transport record');
     await r.dispose();
   });
 
@@ -738,7 +782,8 @@ void main() {
     await r.round(2);
     expect(r.svc.active, 'b');
     expect(r.writes, isEmpty, reason: 'dead and off: nothing to flip');
-    expect(r.events('failed'), hasLength(1));
+    expect(r.downs, isEmpty, reason: 'b answers: a (off, not selected) is no outage');
+    expect(r.switches, isEmpty);
     r.alive['dns-a'] = 20;
     await r.round(); // the answer closes the root and a single answer returns it
     expect(r.writes, ['a on back']);
@@ -860,8 +905,10 @@ void main() {
   });
 
   group('DNS on the node (docs/failures.md → DNS на ноде)', () {
-    Future<_Rig> vpnRig({bool withNodes = true}) async {
-      final r = _Rig(vpn: ['v1', 'v2'], withNodes: withNodes, nodeId: 'N1');
+    /// One VPN candidate by default: nowhere to switch, so the check through another node runs. [spare]: a second VPN
+    /// candidate, the traffic just moves to it.
+    Future<_Rig> vpnRig({bool withNodes = true, bool spare = false}) async {
+      final r = _Rig(vpn: spare ? ['v1', 'v2'] : ['v1'], withNodes: withNodes, nodeId: 'N1');
       await r.settle();
       await r.round();
       return r;
@@ -869,29 +916,42 @@ void main() {
 
     String vkey(_Rig r, String id, String? node) => dnsVerdictKey(r.members[id], node);
 
-    test('a VPN-side miss moves the traffic to the next server at once, while the check still runs', () async {
-      final r = await vpnRig();
+    List<Map> nodesOf(Map down) => ((down['nodes'] as List?) ?? const []).cast<Map>();
+
+    test('a spare DNS on the VPN side: the traffic moves at once and the other node is never asked (no dns.node check)', () async {
+      final r = await vpnRig(spare: true);
+      r.viaAnswers['v1'] = 30;
       r.alive['dns-v1'] = -1;
       await r.round();
       expect(r.svc.active, 'v2');
       expect(r.writes, ['v1 off miss']);
-      expect(r.events('failed'), isEmpty);
-      expect(r.events('failedOnNode'), isEmpty);
       expect((r.svc.toJson()['servers'] as List).first, containsPair('rechecking', true));
+      await r.time.advanceSeconds(3);
+      expect(r.viaAsked, isEmpty, reason: 'with a spare DNS the node is not asked: just switch');
+      expect(r.downs, isEmpty);
+      expect(await r.log(), ['vpn v1>v2 failover']);
       await r.dispose();
     });
 
-    test('it answers through another node: dns/failedOnNode, dead on this node only', () async {
+    test('nowhere to switch, it answers through another node: DnsDown with the node rows (exit red, spare green), dead on this node only', () async {
       final r = await vpnRig();
       r.viaAnswers['v1'] = 30;
       r.alive['dns-v1'] = -1;
       await r.round();
       await r.time.advanceSeconds(3);
-      expect(r.events('failed'), isEmpty);
-      final e = r.events('failedOnNode').single;
-      expect(e['data'], containsPair('server', 'v1'));
-      expect(e['data'], containsPair('node', 'sub::exit'));
-      expect(e['data'], containsPair('via', 'sub::spare'));
+      expect(r.switches, isEmpty);
+      final d = r.downs.last;
+      expect(d['noSpare'], isTrue);
+      final side = (d['sides'] as List).single as Map;
+      expect([side['side'], side['selected']], ['vpn', 'v1'], reason: 'the selection stays');
+      expect(side['servers'], [
+        {'provider': 'v1', 'name': 'v1', 'kinds': ['udp']},
+      ]);
+      final rows = nodesOf(d);
+      expect(rows.map((n) => [n['key'], n['ok']]), unorderedEquals([['sub::exit', false], ['sub::spare', true]]));
+      for (final n in rows) {
+        expect(n.keys, containsAll(['key', 'sub', 'proto', 'ok']));
+      }
       expect(r.verdicts[vkey(r, 'v1', 'N1')]!.node, isTrue);
       expect(r.verdicts.deadOf(dnsServerKey(r.members['v1'])!), isNull, reason: 'the server itself is not dead');
       expect(r.viaAsked.first, 'v1 via spare');
@@ -902,40 +962,39 @@ void main() {
       await r.dispose();
     });
 
-    test('silent through the other node too: the server itself is dead, its verdict holds for every node', () async {
+    test('silent through the other node too: the server itself is dead, both node rows red, its verdict holds for every node', () async {
       final r = await vpnRig();
       r.alive['dns-v1'] = -1; // viaAnswers: silent
       await r.round();
       await r.time.advanceSeconds(3);
-      expect(r.events('failedOnNode'), isEmpty);
-      expect(r.events('failed').single['data'], containsPair('server', 'v1'));
+      expect(nodesOf(r.downs.last).map((n) => [n['key'], n['ok']]), unorderedEquals([['sub::exit', false], ['sub::spare', false]]));
       expect(r.verdicts.deadOf(dnsServerKey(r.members['v1'])!), isTrue);
       expect(r.verdicts[vkey(r, 'v1', 'N1')]!.node, isFalse);
       expect(dnsDeadOf(r.verdicts, r.members['v1'], 'N2'), isTrue, reason: 'dead through every node');
       await r.dispose();
     });
 
-    test('the exit node carries nothing: not the server\'s doing, no event, no verdict', () async {
+    test('the exit node carries nothing: not the server\'s doing, no verdict, the other node is not asked', () async {
       final r = await vpnRig();
       r.exitAlive = false;
       r.alive['dns-v1'] = -1;
       await r.round();
       await r.time.advanceSeconds(3);
-      expect(r.events('failed'), isEmpty);
-      expect(r.events('failedOnNode'), isEmpty);
       expect(r.sentinel.roots.byKey('dns|v1'), isNull);
       expect(r.verdicts.deadOf(vkey(r, 'v1', 'N1')), isNot(isTrue));
       expect(r.viaAsked, isEmpty, reason: 'the other node is not asked about a dead exit node');
+      expect(r.switches, isEmpty);
       await r.dispose();
     });
 
-    test('no spare node (or the transport cannot be asked): the old way, dns/failed on this node\'s key only', () async {
+    test('no spare node (or the transport cannot be asked): DnsDown without node rows, the verdict on this node\'s key only', () async {
       final r = await vpnRig();
       r.spareTag = null;
       r.alive['dns-v1'] = -1;
       await r.round();
       await r.time.advanceSeconds(3);
-      expect(r.events('failed').single['data'], containsPair('server', 'v1'));
+      expect(r.downs, isNotEmpty);
+      expect(nodesOf(r.downs.last), isEmpty, reason: 'no spare node: no rows, not an empty check');
       expect(r.verdicts.deadOf(vkey(r, 'v1', 'N1')), isTrue);
       expect(r.verdicts.deadOf(dnsServerKey(r.members['v1'])!), isNull);
       await r.dispose();
@@ -945,12 +1004,13 @@ void main() {
       q.alive['dns-v1'] = -1;
       await q.round();
       await q.time.advanceSeconds(3);
-      expect(q.events('failed'), hasLength(1));
+      expect(q.downs, isNotEmpty);
+      expect(nodesOf(q.downs.last), isEmpty, reason: 'cannot ask: no rows');
       expect(q.verdicts.deadOf(dnsServerKey(q.members['v1'])!), isNull, reason: 'a silence that proves nothing is no verdict of the server');
       await q.dispose();
     });
 
-    test('an open root of the route explains the miss: nothing switched, no verdict', () async {
+    test('an open root of the route explains the miss: nothing switched, no verdict, no outage', () async {
       final r = await vpnRig();
       r.sentinel.openRoot(
         kind: 'route.dead',
@@ -965,18 +1025,19 @@ void main() {
       await r.time.advanceSeconds(3);
       expect(r.writes, isEmpty);
       expect(r.svc.active, 'v1');
-      expect(r.events('failed'), isEmpty);
-      expect(r.events('failedOnNode'), isEmpty);
+      expect(r.downs, isEmpty);
+      expect(r.switches, isEmpty);
       expect(r.verdicts.deadOf(vkey(r, 'v1', 'N1')), isNot(isTrue));
       await r.dispose();
     });
 
-    test('a dead VPN-side server is asked again every 20 minutes, a repeat miss is counted on the same event', () async {
+    test('a dead VPN-side server is asked again every 20 minutes; it answering closes the outage with DnsUp', () async {
       final r = await vpnRig();
       r.alive['dns-v1'] = -1;
       await r.round();
       await r.time.advanceSeconds(3);
       expect(r.sentinel.roots.byKey('dns|v1'), isNotNull);
+      expect(r.ups, isEmpty);
       int askedV1() => r.asked.where((q) => q.startsWith('dns-v1 ')).length;
       r.asked.clear();
       await r.time.advanceSeconds(10 * 60);
@@ -985,12 +1046,15 @@ void main() {
       await r.time.advanceSeconds(10 * 60);
       await r.svc.checkDue();
       expect(askedV1(), greaterThan(0));
-      expect(r.events('failed'), hasLength(1), reason: 'one event; the repeat is counted on it');
+      expect(r.ups, isEmpty, reason: 'still silent');
       r.alive['dns-v1'] = 20;
       r.asked.clear();
       await r.time.advanceSeconds(20 * 60 + 1);
       await r.svc.checkDue();
       expect(r.sentinel.roots.byKey('dns|v1'), isNull, reason: 'it answered');
+      expect(r.ups, hasLength(1));
+      expect(r.ups.single['afterMs'], greaterThanOrEqualTo(20 * 60 * 1000), reason: 'the whole time it was silent');
+      expect((r.ups.single['sides'] as List).single, containsPair('side', 'vpn'));
       await r.dispose();
     });
   });
@@ -1025,7 +1089,7 @@ void main() {
       final asked = r.asked.where((s) => s.startsWith('dns-a ')).length;
       await r.time.advanceSeconds(5);
       expect(r.asked.where((s) => s.startsWith('dns-a ')).length, asked, reason: 'the round was the ask');
-      expect(r.events('failed'), hasLength(1));
+      expect(r.switches, hasLength(1), reason: 'one record for the confirmed failure');
       expect(r.verdicts.deadOf(key('a')), isTrue);
       await r.dispose();
     });
@@ -1137,7 +1201,8 @@ void main() {
       final r = await raced();
       expect(r.svc.activeOf('direct'), 'p-dot');
       expect(r.writes.toSet(), {'p-doh off reserve', 'p-udp off reserve'});
-      expect(await r.log(), isEmpty, reason: 'the winner of a race is an ordinary choice: no switch event');
+      expect(await r.log(), isEmpty, reason: 'the winner of a race at the start is an ordinary choice: no switch record');
+      expect(await r.tlog(), isEmpty);
       expect(r.notes.any((n) => n.contains('dns race (p, direct; start): doh 40ms, dot 20ms, udp 5ms; winner p-dot')), isTrue, reason: '${r.notes}');
       final p = (r.svc.toJson()['providers'] as List).cast<Map>().firstWhere((x) => x['provider'] == 'p');
       expect(p['winner'], {'id': 'p-dot', 'kind': 'dot', 'ms': 20});
@@ -1186,7 +1251,21 @@ void main() {
       await done;
       expect(r.svc.activeOf('direct'), 'p-doh');
       expect(r.writes, containsAll(['p-doh on race', 'p-dot off reserve']));
-      expect(await r.log(), isEmpty);
+      // the winner after a network change differs from the selection before it: a record (the service decides where it
+      // goes). Within one provider it is a transport change, so either stream may carry it; exactly one record, direct, p.
+      final recs = [...r.switches, ...r.transports];
+      expect(recs, hasLength(1), reason: 'the race winner changed: one record, not skipped');
+      final rec = recs.single;
+      final side = (rec['sides'] as List).single as Map;
+      expect(side['side'], 'direct');
+      if (r.switches.isNotEmpty) {
+        expect(rec['reason'], 'race');
+        expect(side['to'], containsPair('kind', 'doh'));
+      } else {
+        expect(side['provider'], 'p');
+        expect(side['to'], 'doh');
+      }
+      expect(r.downs, isEmpty);
       await r.dispose();
     });
 
@@ -1244,7 +1323,8 @@ void main() {
       await pumpEventQueue();
       expect(r.svc.activeOf('direct'), 'p-doh', reason: 'the reserve took over: same provider, not q');
       expect(r.writes, containsAllInOrder(['p-dot off miss', 'p-doh on failover']));
-      expect(await r.log(), ['direct p-dot>p-doh failover']);
+      expect(await r.log(), isEmpty, reason: 'same provider: not a switch');
+      expect(await r.tlog(), ['direct p dot>doh']);
       await r.dispose();
     });
 
@@ -1316,6 +1396,95 @@ void main() {
       await r.round();
       await pumpEventQueue();
       expect(r.notes.any((n) => n.contains('dns race (p, direct; start)')), isTrue, reason: '${r.notes}');
+      await r.dispose();
+    });
+  });
+
+  group('outage: nowhere to switch (DnsDown / DnsUp) and one record per cause', () {
+    test('every candidate of a side silent: one DnsDown, the selection stays, no switching in a circle; the side that works is not in it', () async {
+      final r = _Rig(direct: ['a', 'b', 'c'], vpn: ['v1', 'v2'], names: {'a': 'Alpha'});
+      await r.settle();
+      await r.round();
+      for (final id in ['a', 'b', 'c']) {
+        r.alive['dns-$id'] = -1;
+      }
+      for (var i = 0; i < 6; i++) {
+        await r.round(2);
+      }
+      expect(r.downs, hasLength(1), reason: 'a repeat round is not a new outage');
+      final d = r.downs.single;
+      final side = (d['sides'] as List).single as Map;
+      expect(side['side'], 'direct', reason: 'the VPN side answers: not in the record');
+      expect(side['selected'], 'a', reason: 'all went silent together: the selection is kept');
+      expect([for (final s in (side['servers'] as List).cast<Map>()) s['provider']], unorderedEquals(['a', 'b', 'c']));
+      expect(((side['servers'] as List).cast<Map>().firstWhere((s) => s['provider'] == 'a'))['name'], 'Alpha');
+      expect(r.switches, isEmpty, reason: 'no switching in a circle between silent servers');
+      expect(r.svc.activeOf('direct'), 'a');
+      expect(r.effectiveFile('direct'), 'a');
+      expect(r.ups, isEmpty);
+      expect(r.viaAsked, isEmpty, reason: 'the direct side has no node check');
+      await r.dispose();
+    });
+
+    test('any answer closes it: DnsUp with the silent time and the side; the same outage is not reported again', () async {
+      final r = _Rig(direct: ['a', 'b']);
+      await r.settle();
+      await r.round();
+      r.alive['dns-a'] = -1;
+      r.alive['dns-b'] = -1;
+      for (var i = 0; i < 3; i++) {
+        await r.round(2);
+      }
+      expect(r.downs, hasLength(1));
+      r.alive['dns-b'] = 30;
+      await r.time.advanceSeconds(20);
+      await r.round();
+      await r.round();
+      expect(r.ups, hasLength(1));
+      final up = r.ups.single;
+      expect(up['afterMs'], allOf(isA<int>(), greaterThanOrEqualTo(20000), lessThan(10 * 60 * 1000)));
+      final s = (up['sides'] as List).single as Map;
+      expect([s['side'], s['provider'], s['kind']], ['direct', 'b', 'udp'], reason: 'the one that answers');
+      expect(s, containsPair('name', 'b'));
+      await r.round(2);
+      expect(r.downs, hasLength(1));
+      expect(r.ups, hasLength(1));
+      await r.dispose();
+    });
+
+    for (final same in [true, false]) {
+      test('one cause moved both sides: ONE record with both sides, same = $same (same providers on both)', () async {
+        final r = _Rig(
+          direct: ['a', 'b'],
+          vpn: ['av', 'bv'],
+          providers: same ? {'av': 'a', 'bv': 'b'} : {'av': 'x', 'bv': 'y'},
+        );
+        await r.settle();
+        await r.round();
+        r.alive['dns-a'] = -1;
+        r.alive['dns-av'] = -1;
+        await r.round();
+        await r.round(2);
+        expect(r.svc.activeOf('direct'), 'b');
+        expect(r.svc.activeOf('vpn'), 'bv');
+        expect(r.switches, hasLength(1), reason: 'one cause: one record, not one per side');
+        final s = r.switches.single;
+        expect([for (final x in (s['sides'] as List).cast<Map>()) x['side']], unorderedEquals(['direct', 'vpn']));
+        expect(s['same'], same);
+        await r.dispose();
+      });
+    }
+
+    test('Switch automatically turned off puts a failed-over side back: reason off, nothing else', () async {
+      final r = _Rig(direct: ['a', 'b']);
+      await r.settle();
+      r.alive['dns-a'] = -1;
+      await r.round(2);
+      await r.round(2);
+      await r.svc.setAuto(false);
+      await Future<void>.delayed(Duration.zero); // the stream delivers its events asynchronously
+      expect(r.switches.map((s) => s['reason']), ['failover', 'off']);
+      expect(r.downs, isEmpty);
       await r.dispose();
     });
   });

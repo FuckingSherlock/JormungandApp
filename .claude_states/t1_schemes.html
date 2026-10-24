@@ -1,0 +1,146 @@
+<!-- raw-html-confirmed -->
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>т1 — схемы событий</title>
+<style>
+body{background:#0f1420;color:#e6e9f0;font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif;margin:0;padding:16px;max-width:980px}
+h2{font-size:17px;font-weight:600;margin:28px 0 6px}
+p.n{color:#9aa3b5;margin:0 0 12px;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.col{background:#171d2b;border-radius:12px;padding:12px}
+.cap{font-size:13px;color:#9aa3b5;margin:0 0 8px}
+.row{background:#1e2536;padding:8px 10px;margin:0 0 6px;font-size:13px;border-left:3px solid transparent}
+.err{border-left-color:#e5534b}.wrn{border-left-color:#d4a72c}.ok{border-left-color:#3fb950}
+.meta{font-size:11px;color:#7d869a}
+.t{font-weight:600}.d{color:#aab2c3}
+.why{font-size:12px;color:#6cb6ff;margin-top:2px}
+.btn{display:inline-block;font-size:11px;border:1px solid #3a4560;border-radius:6px;padding:1px 7px;margin:4px 4px 0 0;color:#6cb6ff}
+.btn.g{color:#9aa3b5}
+.chip{font-size:11px;background:#1f3a5f;color:#9ecbff;border-radius:6px;padding:0 6px;margin-left:4px;font-weight:400}
+.sub{margin:6px 0 0 10px;padding-left:8px;border-left:1px dashed #3a4560;font-size:12px;color:#aab2c3}
+.card{background:#1e2536;border-left:3px solid #d4a72c;padding:10px 14px;max-width:520px}
+.sec{font-size:11px;color:#7d869a;margin:10px 0 2px;text-transform:uppercase;letter-spacing:.04em}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:1px 8px;font-size:12px}.kv span:nth-child(odd){color:#7d869a}
+.st{display:grid;grid-template-columns:18px 1fr 48px;font-size:12px;gap:2px 6px}
+.p{color:#3fb950}.f{color:#e5534b}.i{color:#7d869a}.tm{color:#7d869a;text-align:right}
+.note{font-size:12px;color:#d4a72c}
+svg{max-width:100%;height:auto}
+svg text{font-family:system-ui,Segoe UI,Roboto,sans-serif}
+</style></head><body>
+
+<h2>1. Лента: сейчас и после т1</h2>
+<p class="n">Одна беда — одна строка: следствия под корнем, пара «началось / кончилось» — в одной строке, повторы — счётчиком.</p>
+<div class="grid">
+<div class="col">
+<p class="cap">Сейчас: много строк, «почему» нет</p>
+<div class="row err"><div class="meta">01:02 · error</div><div class="t">sing-box stopped</div><div class="d">Exit code 2 — starting it again</div></div>
+<div class="row"><div class="meta">01:02 · info</div><div class="t">Restart failed</div><div class="d">Attempt 1</div></div>
+<div class="row"><div class="meta">01:02 · info</div><div class="t">Restart failed</div><div class="d">Attempt 2</div></div>
+<div class="row"><div class="meta">01:02 · info</div><div class="t">Restart failed</div><div class="d">Attempt 3 <span class="note">— дальше молчит</span></div></div>
+<div class="row err"><div class="meta">01:03 · error</div><div class="t">sing-box is down</div><div class="d">proxy: kept <span class="note">— кнопки Remove нет</span></div></div>
+<div class="row"><div class="meta">01:04 · info</div><div class="t">sing-box started again</div><div class="d">Attempt 7 · was down 92 s</div></div>
+<div class="row wrn"><div class="meta">09:40 · warn</div><div class="t">No connection</div><div class="d">The system reports no connection</div></div>
+<div class="row wrn"><div class="meta">09:40 · warn</div><div class="t">No route answers</div><div class="d">waiting</div></div>
+<div class="row wrn"><div class="meta">09:41 · warn</div><div class="t">mail.ru does not open</div><div class="d">Not through your routes <span class="note">— хотя дело в сети</span></div></div>
+<div class="row err"><div class="meta">12:10 · error</div><div class="t">Subscription update failed</div><div class="d">HTTP 502 <span class="note">— следующие сбои молчат</span></div></div>
+</div>
+<div class="col">
+<p class="cap">После т1</p>
+<div class="row ok"><div class="meta">01:02 · error · решено 01:04, длилось 92 с</div><div class="t">sing-box упал <span class="chip">+7 следствий</span></div><div class="d">Код 2 · перезапуск ×6 не удался · работает снова</div><div class="why">Причина: sing-box завершился сам (код 2)</div><span class="btn">Send report</span><span class="btn">In raw log</span>
+<div class="sub">Restart failed ×6 (01:02–01:04) ▸<br>sing-box is down · интернет был заблокирован ▸</div></div>
+<div class="row wrn"><div class="meta">09:40 · warn · идёт</div><div class="t">Нет сети <span class="chip">+2 следствия</span></div><div class="d">Прямые проверки не проходят</div><div class="why">Причина: сети нет (решили пробы)</div><span class="btn">In raw log</span>
+<div class="sub">No route answers — следствие ▸<br>mail.ru does not open — следствие ▸</div></div>
+<div class="row wrn"><div class="meta">12:10 · warn · ×4, последний 12:55</div><div class="t">Подписка Remnawave не обновилась</div><div class="d">HTTP 502</div><div class="why">Причина: ни один путь не ответил за 10 с</div><span class="btn">Retry</span><span class="btn">Open</span></div>
+<div class="row wrn"><div class="meta">13:00 · warn</div><div class="t">Сеть требует входа <span class="chip">+3 следствия</span></div><div class="d">Строка-группа: корень без своего события (captive)</div></div>
+</div>
+</div>
+
+<h2>2. Раскрытая строка</h2>
+<p class="n">Что (заголовок, деталь) → почему (строка причины, проверки) → что делать (кнопки). Пример — dns/failed.</p>
+<div class="card">
+<div class="meta">14:22 · warn · ×2</div>
+<div class="t">DNS-сервер Cloudflare не отвечает</div>
+<div class="d">Сторона VPN · DoH · через Frankfurt 1</div>
+<div class="why">Причина: не отвечает и через запасную ноду</div>
+<span class="btn">Switch server</span><span class="btn">Check now</span><span class="btn">Open</span>
+<div class="sec">Поля</div>
+<div class="kv"><span>server</span><span>cf-doh</span><span>side</span><span>vpn</span><span>path</span><span>proxy</span><span>since</span><span>14:21:40</span></div>
+<div class="sec">Проверки (trail)</div>
+<div class="st">
+<span class="f">✗</span><span>Подозрение: 3 промаха за 20 с</span><span class="tm">+0 с</span>
+<span class="p">✓</span><span>Сеть есть (wifi)</span><span class="tm">+0 с</span>
+<span class="p">✓</span><span>Ядро работает</span><span class="tm">+0 с</span>
+<span class="i">·</span><span>Ждём окно постоянства 30 с</span><span class="tm">+0 с</span>
+<span class="f">✗</span><span>Через ноду выхода — нет ответа (таймаут)</span><span class="tm">+31 с</span>
+<span class="f">✗</span><span>Через запасную ноду Warsaw — нет ответа</span><span class="tm">+33 с</span>
+<span class="p">✓</span><span>Google DNS через ту же ноду — отвечает</span><span class="tm">+33 с</span>
+</div>
+<div class="sec">Повторы</div>
+<div style="font-size:12px">2 раза · первый 14:22 · последний 15:40 <span style="color:#6cb6ff">все времена ▾</span></div>
+<div class="sec">Следствия (1)</div>
+<div style="font-size:12px;color:#aab2c3">dns/failedOnNode — cf-doh на Frankfurt 1, 14:21 ▸</div>
+<span class="btn g">Hide this type</span><span class="btn g">Show only this type</span><span class="btn g">In raw log</span>
+</div>
+
+<h2>3. Уведомлять ли</h2>
+<p class="n">Для событий warn / error. Закрытие пары заменяет уведомление об открытии (тот же id).</p>
+<svg width="680" viewBox="0 0 680 520">
+<defs><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="#7d869a" stroke-width="1.5"/></marker></defs>
+<g font-size="14" text-anchor="middle" dominant-baseline="central">
+<rect x="180" y="40" width="220" height="44" rx="8" fill="#1e2536" stroke="#3a4560"/><text x="290" y="62" fill="#e6e9f0">Событие warn / error</text>
+<g fill="#2a2350" stroke="#7f77dd"><rect x="180" y="120" width="220" height="44" rx="8"/><rect x="180" y="200" width="220" height="44" rx="8"/><rect x="180" y="280" width="220" height="44" rx="8"/><rect x="180" y="360" width="220" height="44" rx="8"/></g>
+<text x="290" y="142" fill="#d6d3fb">Тип в journalOnly?</text>
+<text x="290" y="222" fill="#d6d3fb">Есть verdict?</text>
+<text x="290" y="302" fill="#d6d3fb">confirmed и без cause?</text>
+<text x="290" y="382" fill="#d6d3fb">Категория вкл. (+ фон)?</text>
+<rect x="180" y="440" width="220" height="56" rx="8" fill="#0d3b2e" stroke="#1d9e75"/><text x="290" y="458" fill="#b6f0d8">Уведомление</text><text x="290" y="478" font-size="12" fill="#7fd4b0">до 2 кнопок, пара — один id</text>
+<g fill="#1e2536" stroke="#3a4560"><rect x="460" y="120" width="180" height="44" rx="8"/><rect x="460" y="200" width="180" height="44" rx="8"/><rect x="460" y="280" width="180" height="44" rx="8"/><rect x="460" y="360" width="180" height="44" rx="8"/></g>
+<text x="550" y="142" fill="#aab2c3">Только журнал</text>
+<text x="550" y="222" fill="#aab2c3">Правила типа</text>
+<text x="550" y="302" fill="#aab2c3">Журнал, под корнем</text>
+<text x="550" y="382" fill="#aab2c3">Только журнал</text>
+</g>
+<g stroke="#7d869a" stroke-width="1.2" marker-end="url(#a)">
+<line x1="290" y1="84" x2="290" y2="117"/><line x1="290" y1="164" x2="290" y2="197"/><line x1="290" y1="244" x2="290" y2="277"/><line x1="290" y1="324" x2="290" y2="357"/><line x1="290" y1="404" x2="290" y2="437"/>
+<line x1="400" y1="142" x2="457" y2="142"/><line x1="400" y1="222" x2="457" y2="222"/><line x1="400" y1="302" x2="457" y2="302"/><line x1="400" y1="382" x2="457" y2="382"/>
+</g>
+<g font-size="12" fill="#9aa3b5" dominant-baseline="central">
+<text x="300" y="182">нет</text><text x="300" y="262">да</text><text x="300" y="342">да</text><text x="300" y="422">да</text>
+<text x="429" y="130" text-anchor="middle">да</text><text x="429" y="210" text-anchor="middle">нет</text><text x="429" y="290" text-anchor="middle">нет</text><text x="429" y="370" text-anchor="middle">нет</text>
+</g>
+</svg>
+
+<h2>4. Четыре механизма свёртки</h2>
+<p class="n">Полный список, что во что складывается, — таблица в docs/logs.md → «Свёртки: полный список».</p>
+<div class="grid">
+<div class="col"><p class="cap">Корень → следствия (cause)</p>
+<div class="row wrn"><div class="t">Нет сети <span class="chip">+3</span></div><div class="sub">No route answers · mail.ru · подписка не обновилась</div></div>
+<p class="cap">Разные беды, одна причина. Ещё: «Сервер X не отвечает» → переключения Auto, fallback правил, DNS node; «Сеть сменилась».</p></div>
+<div class="col"><p class="cap">Пара «началось / кончилось»</p>
+<div class="row ok"><div class="meta">решено, длилось 6 мин</div><div class="t">Auto: временно на Warsaw, вернулся на Frankfurt</div></div>
+<p class="cap">lost/restored, offline/online, failover/back (Auto, DNS), fallback/targetBack, targetLost/Found, removed/back, tunTcpDead/Back.</p></div>
+<div class="col"><p class="cap">Операция (op)</p>
+<div class="row"><div class="t">Подписка обновлена: +3 −2</div><div class="d">среди пропавших — используемый</div><div class="sub">sub/updated · sub/removed · sub/back</div></div>
+<p class="cap">Переподключение, «обновить все», обновление списков, обновление приложения, замер скорости.</p></div>
+<div class="col"><p class="cap">Повторы (×N)</p>
+<div class="row wrn"><div class="meta">×5 · последний 13:40</div><div class="t">Не удалось подключиться</div></div>
+<p class="cap">connectFailed подряд, sub/failed той же ошибкой, auto/fastest, updateFailed, один сайт из разных приложений.</p></div>
+</div>
+
+<h2>5. Переподключение</h2>
+<div class="grid">
+<div class="col"><p class="cap">Сейчас: смена режима</p>
+<div class="row"><div class="meta">10:00 · info · мои действия</div><div class="t">Mode: Proxy</div></div>
+<div class="row"><div class="meta">10:00 · info</div><div class="t">Connected</div><div class="d">Proxy · rules · Frankfurt 1</div></div>
+<p class="cap" style="margin-top:10px">Сейчас: «отключить → подключить» руками</p>
+<div class="row"><div class="meta">10:05 · мои действия</div><div class="t">Disconnect</div></div>
+<div class="row"><div class="meta">10:05 · info</div><div class="t">Disconnected</div><div class="d">by user</div></div>
+<div class="row"><div class="meta">10:05 · мои действия</div><div class="t">Connect</div></div>
+<div class="row"><div class="meta">10:05 · info</div><div class="t">Connected</div><div class="d">TUN · rules · Frankfurt 1</div></div>
+<div class="row"><div class="meta">10:06 · info</div><div class="t">Connected</div><div class="d"><span class="note">ядро докачало списки — ещё раз</span></div></div>
+</div>
+<div class="col"><p class="cap">После т1</p>
+<div class="row"><div class="meta">10:00 · info</div><div class="t">Переподключено</div><div class="d">Режим: TUN → Proxy · 1,2 с</div></div>
+<div class="row"><div class="meta">10:05 · info</div><div class="t">Переподключено вручную</div><div class="d">TUN · rules · Frankfurt 1 · 2,0 с</div><div class="sub">10:06 докачаны списки, переподключено ▸</div></div>
+</div>
+</div>
+</body></html>

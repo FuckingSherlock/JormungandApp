@@ -420,6 +420,11 @@ String dnsKind(String addr) {
   };
 }
 
+/// The one table of the transport labels by kind (`doh` -> DoH); an unknown kind is shown as it is.
+const Map<String, String> dnsKindNames = {'doh': 'DoH', 'dot': 'DoT', 'doq': 'DoQ', 'tcp': 'TCP', 'udp': 'UDP', 'system': 'System'};
+
+String dnsKindName(String kind) => dnsKindNames[kind] ?? kind;
+
 /// The name of a server made from its address when none is typed.
 String dnsNameFromAddr(String addr) =>
     addr.replaceFirst(RegExp(r'^\w+://'), '').split('/').first;

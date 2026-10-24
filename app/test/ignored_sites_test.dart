@@ -90,7 +90,9 @@ void main() {
     await tester.tap(find.byIcon(AppTab.logs.icon));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Ignore site'));
+    await tester.tap(find.text('Ignore site ▾'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Everywhere'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(host.notif.ignoredSites, ['dead.example.com']);
@@ -108,7 +110,9 @@ void main() {
     await pumpApp(tester, host);
     await tester.tap(find.byIcon(AppTab.logs.icon));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ignore site'));
+    await tester.tap(find.text('Ignore site ▾'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Everywhere'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('dead.example.com ignored'), findsOneWidget);

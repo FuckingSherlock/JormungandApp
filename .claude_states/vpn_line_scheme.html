@@ -1,0 +1,55 @@
+<!-- raw-html-confirmed -->
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Линия VPN в ленте — вариант 1</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#1c1c1b;color:#e6e4dc;margin:24px;max-width:980px}
+h2{font-weight:500;font-size:18px;margin:0 0 4px}
+.wrap{display:grid;grid-template-columns:420px 1fr;gap:28px;align-items:start}
+.feed{background:#262624;border:1px solid #3a3a37;border-radius:12px;padding:10px 14px}
+.r{display:flex;min-height:46px}
+.g{width:34px;position:relative;flex:none}
+.t{flex:1;border-bottom:1px solid #34342f;padding:6px 0;font-size:14px;line-height:1.35}
+.m{color:#8f8d86;font-size:12px}
+.n{color:#a8a69e;font-size:13px;line-height:1.6}
+.n b{font-weight:500;color:#e6e4dc}
+.k{display:inline-block;width:26px;vertical-align:middle;margin-right:6px}
+</style></head><body>
+<h2>Линия VPN — вариант 1 (шина)</h2>
+<p class="n">Лента как в приложении: новые снизу, время идёт сверху вниз.</p>
+<div class="wrap">
+<div class="feed" id="f"></div>
+<div class="n">
+<p><b>Линия слева</b> — состояние VPN в момент каждого события. По ней видно, в каком состоянии случилось то, что написано в строке.</p>
+<p><span class="k" style="border-top:3px solid #1D9E75"></span><b>Зелёная</b> — VPN подключён и работает.</p>
+<p><span class="k" style="border-top:3px solid #E24B4A"></span><b>Красная</b> — VPN не работает (sing-box не поднялся за 30 с).</p>
+<p><span class="k" style="border-top:3px solid #EF9F27"></span><b>Жёлтая</b> — ожидание: VPN в порядке, нет сети.</p>
+<p><span class="k" style="border-top:3px dashed #888780"></span><b>Серый пунктир</b> — VPN выключен.</p>
+<p><b>Точка</b> — событие, на котором состояние сменилось: подключение, начало и конец сбоя, отключение. Цвет точки — состояние, которое началось.</p>
+<p><b>Кольцо</b> — переподключение: VPN не выключался, линия идёт сквозь.</p>
+<p>Остальные события (сайт, Auto, подписка) — без отметки, просто лежат на линии.</p>
+<p>Конец любой пары — отдельной строкой (сейчас он сливается в строку начала). Строки подключения, отключения, сбоя и восстановления фильтр не прячет.</p>
+</div>
+</div>
+<script>
+const G='#1D9E75',R='#E24B4A',Y='#EF9F27',N='#888780';
+const rows=[
+['14:40','VPN disconnected · by you',[[N,1],[G]],N],
+['14:31','youtube.com does not open through Foo-NL',[[G],[G]]],
+['14:26','VPN works again · sing-box is running',[[G],[R]],G],
+['14:20','VPN is down · sing-box stopped',[[R],[Y]],R],
+['14:12','Subscription Foo: server in use removed',[[Y],[Y]]],
+['14:10','Waiting for network · no internet connection',[[Y],[G]],Y],
+['14:05','Reconnected · settings: mode TUN → Proxy',[[G],[G]],G,1],
+['13:50','Auto: NL-1 → NL-2',[[G],[G]]],
+['13:40','You connected: Foo · TUN',[[G],[N,1]],G],
+['13:10','App updated',[[N,1],[N,1]]]];
+const seg=(top,c,d)=>`<div style="position:absolute;left:15px;top:${top};height:50%;border-left:3px ${d?'dashed':'solid'} ${c}"></div>`;
+let h='';
+for(const [tm,tx,[dn,up],dot,ring] of rows.slice().reverse()){
+ let g=seg('0',up[0],up[1])+seg('50%',dn[0],dn[1]);
+ if(dot) g+=`<div style="position:absolute;left:9px;top:calc(50% - 7px);width:15px;height:15px;border-radius:50%;box-sizing:border-box;${ring?`background:#262624;border:3px solid ${dot}`:`background:${dot}`}"></div>`;
+ h+=`<div class="r"><div class="g">${g}</div><div class="t"><div class="m">${tm}</div>${tx}</div></div>`;
+}
+document.getElementById('f').innerHTML=h;
+</script>
+</body></html>

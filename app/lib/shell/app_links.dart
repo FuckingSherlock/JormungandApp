@@ -53,8 +53,9 @@ class AppLinks {
   /// that rule; without, a new rule (the exact domain [host], Fallback = Proxy through the node [via]).
   final void Function({required String app, String? ruleId, String? host, String? via})? openAppRule;
 
-  /// The Route sheet; [edit] opens it in edit mode (the "Nothing in Auto" alert).
-  final void Function({bool edit})? openRoute;
+  /// The Route sheet; [edit] opens it in edit mode (the "Nothing in Auto" alert); [node] (a node key `sid::nid`)
+  /// unfolds its entry, scrolls to the node and blinks it twice (the "go" of a node row in an event).
+  final void Function({bool edit, String? node})? openRoute;
 
   /// Logs -> Events at an event.
   final void Function(int id)? openLogsEvent;

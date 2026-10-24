@@ -1,12 +1,11 @@
-// Event reason rows (docs/connect-model.md «Строки причины», «Конфликт приложение ↔ правило»; plan app-rules): above
-// the ⚠️ / ✅ rows of a site/* event a Rule row names what decided the request (own rule, app rule, service, quick
-// rule, main flow) and a tap goes to its place; an event with an app has no Create rule, its Rule row under the App
-// row is the app's rule that caught the host, a disabled one with this host, or «New rule for <host>» (a new app rule
-// with Fallback through the node that opened the site); a rule is named from the current UI data (renamed → new name,
-// deleted → the event's name without a chevron, unnamed by the core → its raw text); an old event without data.rule
-// has no reason rows; the App row and the matched rule say «overridden by rule» / «applied» and the own rules that
-// would catch the host say «overridden by app» (labels follow the current settings, not the event); a tap on a rule
-// row leaves a return to the event.
+// Rows of a site/* event (docs/connect-model.md «Карточка сайта», «Событие с приложением», «Конфликт приложение ↔
+// правило»): the card's Rule row names the rule that catches the site (a tap opens its form, a tap on a rule row leaves
+// a return to the event); without such a rule the row is «Create <host> rule», prefilled with Fallback through the
+// entry or node that opened the site (blocked only; unreachable has no open route, so no Fallback line). An event with
+// an app has no Create rule: its Rule row under the App row is the app's rule that caught the host, a disabled one with
+// this host, or «New rule for <host>» (a new app rule with Fallback through the node that opened the site); the App row
+// and the matched rule say «overridden by rule» / «applied» and the own rules that would catch the host say «overridden
+// by app» (labels follow the current settings, not the event).
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -90,12 +89,10 @@ Map<String, dynamic> _unreachable({Map<String, dynamic>? rule, String? app}) => 
   'app': ?app,
 };
 
-String _titleOf(FakeCoreHost host, Map<String, dynamic> e) =>
-    EventWords(_en, host.catalog).describe(EventRecord.fromJson(e)).title;
-
-/// Opens the row by a tap on its title, as on the page. Plain pumps: a marquee never settles.
-Future<void> _expand(WidgetTester tester, String title) async {
-  await tester.tap(find.text(title).first);
+/// Opens a site card by a tap on its header, which names the host (the header words are the card's own).
+Future<void> _openSite(WidgetTester tester, Map<String, dynamic> e) async {
+  final host = (e['data'] as Map)['host'] as String;
+  await tester.tap(find.textContaining(host).first);
   await tester.pump(const Duration(milliseconds: 500));
 }
 
@@ -106,8 +103,8 @@ class _Calls {
   AppLinks links() => AppLinks(
     openRuleForm: (id) => list.add('ruleForm:$id'),
     openRules: ([at]) => list.add('rules:${at ?? '-'}'),
-    openRoute: ({bool edit = false}) => list.add('route'),
-    newRuleFor: ({host, app, via}) => list.add('newRule:${host ?? '-'}|${app ?? '-'}'),
+    openRoute: ({bool edit = false, String? node}) => list.add('route'),
+    newRuleFor: ({host, app, via}) => list.add('newRule:${host ?? '-'}|${app ?? '-'}|${via ?? '-'}'),
     openAppRule: ({required String app, String? ruleId, String? host, String? via}) =>
         list.add('appRule:$app|${ruleId ?? '-'}|${host ?? '-'}|${via ?? '-'}'),
   );
@@ -192,158 +189,69 @@ void _appRules(FakeCoreHost host, {AppHalf? tcp, List<UserRule> rules = const []
 }
 
 void main() {
-  group('reason rows of a site event (connect-model «Строки причины»)', () {
-    // the reason row names what decided the request (its label: «Rule», or «Service» for a service); a tap goes to
-    // its place (the link named in the last column)
-    final cases = <(String, String, Map<String, dynamic>, String, String)>[
-      ('own rule', 'Rule', {'kind': 'user', 'id': 'r1', 'name': 'Streaming'}, 'Streaming', 'ruleForm:r1'),
-      ('service', 'Service', {'kind': 'service', 'id': 'youtube', 'name': 'YouTube'}, 'YouTube', 'rules:svc:youtube'),
-      ('quick: Block ads', 'Rule', {'kind': 'quick', 'id': 'ads', 'name': 'Block ads'}, 'Block ads', 'rules:quick:ads'),
-      (
-        'quick: My region direct',
-        'Rule',
-        {'kind': 'quick', 'id': 'region', 'name': 'My region direct'},
-        'My region direct',
-        'rules:quick:region',
-      ),
-      ('main flow', 'Rule', {'kind': 'final'}, 'None — main flow', 'route'),
-    ];
-
-    for (final (label, row, rule, name, call) in cases) {
-      testWidgets('$label: a $row row with "$name" above the verdict rows; a tap goes to $call', (tester) async {
-        final host = FakeCoreHost();
-        _catalog(host);
-        _ownRule(host);
-        final e = host.addEvent('site', 'blocked', level: 'warn', at: _at(0), data: _blocked(rule: rule));
-        final calls = _Calls();
-        await _pump(tester, host, e['id'] as int, links: calls.links());
-        await _expand(tester, _titleOf(host, e));
-
-        expect(find.text(row), findsOneWidget);
-        expect(find.textContaining(name), findsOneWidget);
-        await tester.tap(find.textContaining(name).first);
-        await tester.pump();
-        expect(calls.list, [call]);
-      });
-    }
-
-    testWidgets('an old event without data.rule has no reason rows', (tester) async {
+  group('the Rule row of a site/blocked or site/unreachable card', () {
+    testWidgets('a rule catches the site: the row is "<host> rule"; a tap opens its form, and the return goes to the event', (
+      tester,
+    ) async {
       final host = FakeCoreHost();
       _catalog(host);
       _ownRule(host);
-      final e = host.addEvent('site', 'blocked', level: 'warn', at: _at(0), data: _blocked());
-      await _pump(tester, host, e['id'] as int);
-      await _expand(tester, _titleOf(host, e));
-
-      expect(find.text('Rule'), findsNothing);
-      expect(find.textContaining('None — main flow'), findsNothing);
-    });
-
-    testWidgets('a renamed own rule shows its current name, not the one the event kept', (tester) async {
-      final host = FakeCoreHost();
-      _catalog(host);
-      _ownRule(host, name: 'New name');
-      final e = host.addEvent(
-        'site',
-        'blocked',
-        level: 'warn',
-        at: _at(0),
-        data: _blocked(rule: {'kind': 'user', 'id': 'r1', 'name': 'Old name'}),
-      );
-      await _pump(tester, host, e['id'] as int);
-      await _expand(tester, _titleOf(host, e));
-
-      expect(find.textContaining('New name'), findsOneWidget);
-      expect(find.textContaining('Old name'), findsNothing);
-    });
-
-    testWidgets('a deleted rule (not in the catalog) shows the name from the event', (tester) async {
-      final host = FakeCoreHost();
-      _catalog(host);
-      final e = host.addEvent(
-        'site',
-        'blocked',
-        level: 'warn',
-        at: _at(0),
-        data: _blocked(rule: {'kind': 'user', 'id': 'r9', 'name': 'Gone'}),
-      );
-      await _pump(tester, host, e['id'] as int);
-      await _expand(tester, _titleOf(host, e));
-
-      expect(find.textContaining('Gone'), findsOneWidget);
-    });
-
-    testWidgets('a rule the core could not name shows its raw text', (tester) async {
-      final host = FakeCoreHost();
-      _catalog(host);
-      final e = host.addEvent(
-        'site',
-        'blocked',
-        level: 'warn',
-        at: _at(0),
-        data: _blocked(rule: {'kind': 'unknown', 'text': 'raw-rule-text'}),
-      );
-      await _pump(tester, host, e['id'] as int);
-      await _expand(tester, _titleOf(host, e));
-
-      expect(find.textContaining('raw-rule-text'), findsOneWidget);
-    });
-
-    testWidgets('a tap on a rule row leaves a return to the event (Back comes back to it)', (tester) async {
-      final host = FakeCoreHost();
-      _catalog(host);
-      _ownRule(host);
-      final e = host.addEvent(
-        'site',
-        'blocked',
-        level: 'warn',
-        at: _at(0),
-        data: _blocked(rule: {'kind': 'user', 'id': 'r1', 'name': 'Streaming'}),
-      );
+      final e = host.addEvent('site', 'blocked', level: 'warn', at: _at(0), data: _blocked(rule: {'kind': 'user', 'id': 'r1', 'name': 'Streaming'}));
       final calls = _Calls();
       final logs = await _pump(tester, host, e['id'] as int, links: calls.links());
-      await _expand(tester, _titleOf(host, e));
-      await tester.tap(find.textContaining('Streaming').first);
-      await tester.pump();
+      await _openSite(tester, e);
 
+      expect(find.text('blocked.example rule'), findsOneWidget);
+      await tester.tap(find.text('blocked.example rule'));
+      await tester.pump();
       expect(calls.list, ['ruleForm:r1']);
       expect(logs.returnId, e['id']);
+    });
+
+    testWidgets('no rule for the site: "Create blocked.example rule" prefills a new rule, Fallback = the entry that opened it', (
+      tester,
+    ) async {
+      final host = FakeCoreHost();
+      _catalog(host);
+      final e = host.addEvent('site', 'blocked', level: 'warn', at: _at(0), data: _blocked(rule: {'kind': 'final'}));
+      final calls = _Calls();
+      await _pump(tester, host, e['id'] as int, links: calls.links());
+      await _openSite(tester, e);
+
+      await tester.tap(find.text('Create blocked.example rule'));
+      await tester.pump();
+      expect(calls.list, ['newRule:blocked.example|-|sub1']);
+    });
+
+    testWidgets('Fallback line only on blocked: "Fallback: <the node that opened the site>" in the new rule row', (tester) async {
+      final host = FakeCoreHost();
+      _catalog(host);
+      final blocked = host.addEvent('site', 'blocked', level: 'warn', at: _at(0), data: _blocked(rule: {'kind': 'final'}));
+      await _pump(tester, host, blocked['id'] as int, links: _Calls().links());
+      await _openSite(tester, blocked);
+      expect(find.textContaining('Fallback: '), findsOneWidget);
+
+      final unreachable = host.addEvent('site', 'unreachable', level: 'warn', at: _at(10), data: _unreachable(rule: {'kind': 'final'}));
+      await _pump(tester, host, unreachable['id'] as int, links: _Calls().links());
+      await _openSite(tester, unreachable);
+      expect(find.textContaining('Fallback: '), findsNothing);
     });
   });
 
   group('events with an app (connect-model «Событие с приложением»)', () {
     // the links are wired (newRuleFor included), so a missing Create rule is the app's doing, not an unwired link
-    testWidgets('an event with an app has no Create rule (blocked and unreachable)', (tester) async {
+    testWidgets('an event with an app has the Create rule row too (blocked and unreachable), under the App row', (tester) async {
       for (final e0 in [
-        ('blocked', _blocked(app: _pkg)),
-        ('unreachable', _unreachable(app: _pkg)),
+        ('blocked', _blocked(app: _pkg), 'blocked.example'),
+        ('unreachable', _unreachable(app: _pkg), 'dead.example'),
       ]) {
         final host = FakeCoreHost();
         _catalog(host);
         final e = host.addEvent('site', e0.$1, level: 'warn', at: _at(0), data: e0.$2);
         await _pump(tester, host, e['id'] as int, links: _Calls().links());
-        expect(find.text('Create rule'), findsNothing, reason: 'site/${e0.$1} with an app');
+        await _openSite(tester, e);
+        expect(find.text('Create ${e0.$3} rule'), findsOneWidget, reason: 'site/${e0.$1} with an app');
       }
-    });
-
-    testWidgets('site/unreachable never has Create rule, with or without an app (no working target)', (tester) async {
-      final host = FakeCoreHost();
-      _catalog(host);
-      final e = host.addEvent('site', 'unreachable', level: 'warn', at: _at(0), data: _unreachable());
-      await _pump(tester, host, e['id'] as int, links: _Calls().links());
-      expect(find.text('Create rule'), findsNothing);
-    });
-
-    testWidgets('an event without an app keeps Create rule; a tap opens the new-rule form for the host', (tester) async {
-      final host = FakeCoreHost();
-      _catalog(host);
-      final e = host.addEvent('site', 'blocked', level: 'warn', at: _at(0), data: _blocked());
-      final calls = _Calls();
-      await _pump(tester, host, e['id'] as int, links: calls.links());
-      expect(find.text('Create rule'), findsOneWidget);
-      await tester.tap(find.text('Create rule'));
-      await tester.pump();
-      expect(calls.list, ['newRule:blocked.example|-']);
     });
 
     testWidgets('the app rule that caught the host: its Rule row under App names it; a tap opens that rule', (
@@ -366,10 +274,10 @@ void main() {
       );
       final calls = _Calls();
       await _pump(tester, host, e['id'] as int, links: calls.links());
-      await _expand(tester, _titleOf(host, e));
+      await _openSite(tester, e);
 
       expect(find.textContaining('Telegram direct'), findsOneWidget);
-      expect(find.text('New rule for blocked.example'), findsNothing, reason: 'no duplicate: the rule exists');
+      expect(find.text('Create blocked.example rule'), findsNothing, reason: 'no duplicate: the rule exists');
       await tester.tap(find.textContaining('Telegram direct').first);
       await tester.pump();
       expect(calls.list, ['appRule:$_pkg|ar1|-|-']);
@@ -390,10 +298,10 @@ void main() {
       final e = host.addEvent('site', 'blocked', level: 'warn', at: _at(0), data: _blocked(app: _pkg, rule: {'kind': 'final'}));
       final calls = _Calls();
       await _pump(tester, host, e['id'] as int, links: calls.links());
-      await _expand(tester, _titleOf(host, e));
+      await _openSite(tester, e);
 
       expect(find.textContaining('Old direct'), findsOneWidget);
-      expect(find.text('New rule for blocked.example'), findsNothing);
+      expect(find.text('Create blocked.example rule'), findsNothing);
       await tester.tap(find.textContaining('Old direct').first);
       await tester.pump();
       expect(calls.list, ['appRule:$_pkg|ar2|-|-']);
@@ -424,10 +332,10 @@ void main() {
         final e = host.addEvent('site', data.containsKey('viaServer') ? 'blocked' : 'unreachable', level: 'warn', at: _at(0), data: data);
         final calls = _Calls();
         await _pump(tester, host, e['id'] as int, links: calls.links());
-        await _expand(tester, _titleOf(host, e));
+        await _openSite(tester, e);
 
-        expect(find.text('New rule for $host0'), findsOneWidget);
-        await tester.tap(find.text('New rule for $host0'));
+        expect(find.text('Create $host0 rule'), findsOneWidget);
+        await tester.tap(find.text('Create $host0 rule'));
         await tester.pump();
         expect(calls.list, ['appRule:$_pkg|-|$host0|$via']);
       });
@@ -440,7 +348,7 @@ void main() {
       final e = host.addEvent('site', 'blocked', level: 'warn', at: _at(0), data: _blocked(app: _pkg, rule: {'kind': 'final'}));
       final calls = _Calls();
       await _pump(tester, host, e['id'] as int, links: calls.links());
-      await _expand(tester, _titleOf(host, e));
+      await _openSite(tester, e);
 
       await tester.tap(find.text('Telegram').first);
       await tester.pump();
@@ -464,7 +372,7 @@ void main() {
         data: _blocked(app: _pkg, rule: {'kind': 'user', 'id': 'r1', 'name': 'Streaming'}),
       );
       await _pump(tester, host, e['id'] as int);
-      await _expand(tester, _titleOf(host, e));
+      await _openSite(tester, e);
 
       expect(find.text('overridden by rule'), findsOneWidget);
       expect(find.text('applied'), findsOneWidget);
@@ -482,7 +390,7 @@ void main() {
         data: _blocked(app: _pkg, rule: {'kind': 'user', 'id': 'r1', 'name': 'Streaming'}),
       );
       await _pump(tester, host, e['id'] as int);
-      await _expand(tester, _titleOf(host, e));
+      await _openSite(tester, e);
 
       expect(find.text('overridden by rule'), findsNothing);
       expect(find.text('applied'), findsNothing);
@@ -503,7 +411,7 @@ void main() {
         data: _blocked(app: _pkg, rule: {'kind': 'app', 'id': _pkg, 'name': 'Telegram'}),
       );
       await _pump(tester, host, e['id'] as int);
-      await _expand(tester, _titleOf(host, e));
+      await _openSite(tester, e);
 
       expect(find.text('overridden by app'), findsOneWidget);
       expect(find.text('applied'), findsOneWidget);
@@ -522,12 +430,12 @@ void main() {
         data: _blocked(app: _pkg, rule: {'kind': 'user', 'id': 'r1', 'name': 'Streaming'}),
       );
       await _pump(tester, host, e['id'] as int);
-      await _expand(tester, _titleOf(host, e));
+      await _openSite(tester, e);
       expect(find.text('overridden by rule'), findsOneWidget, reason: 'precondition: the route is set');
 
       host.catalog.appRules.remove(_pkg);
       await _pump(tester, host, e['id'] as int);
-      await _expand(tester, _titleOf(host, e));
+      await _openSite(tester, e);
       expect(find.text('overridden by rule'), findsNothing);
       expect(find.text('applied'), findsNothing);
     });

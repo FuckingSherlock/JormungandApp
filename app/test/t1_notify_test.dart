@@ -73,7 +73,7 @@ void main() {
       'rules/ruleSetFailed': ('rules', 'ruleSetFailed', 'warn', <String, dynamic>{'tag': 'geo'}, ['retryRuleSets']),
       'conn/vpnDown by network': ('conn', 'vpnDown', 'error', <String, dynamic>{'causes': ['network']}, ['networkSettings']),
       'conn/vpnDown by core, not running': ('conn', 'vpnDown', 'error', <String, dynamic>{'causes': ['core']}, ['retry']),
-      'dns/failed': ('dns', 'failed', 'warn', <String, dynamic>{}, ['open']),
+      'dns/down': ('dns', 'down', 'error', <String, dynamic>{}, ['open']),
     };
     cases.forEach((name, c) {
       testWidgets('$name: the bold button of the table, and never more than two', (tester) async {

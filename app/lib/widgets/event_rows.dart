@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:jormungand_core/jormungand_core.dart'
-    show EventGroup, EventRecord, alwaysShownTypes, eventCats;
+    show EventGroup, EventRecord, IgnoredSites, alwaysShownTypes, eventCats, rulesCatching;
 
 import '../core/core_host.dart';
+import '../core/event_cards_dns.dart';
+import '../core/event_cards_site.dart';
 import '../core/event_text.dart';
 import '../core/logs_controller.dart';
+import '../core/rules_text.dart' show actText;
 import '../l10n/l10n.dart';
 import '../shell/app_links.dart';
 import '../theme/app_colors.g.dart';
 import 'app_sheet.dart';
+import 'event_card.dart';
 import 'follow_list.dart' show HitFlash;
 import 'form_parts.dart';
 import 'ignored_sites.dart';
@@ -274,6 +278,9 @@ String? eventOpenTarget(EventRecord e, CoreHost host) {
   return null;
 }
 
+/// The events whose "Check again" (a retry of a Checked row) is running now.
+final ValueNotifier<Set<int>> _rechecking = ValueNotifier<Set<int>>(const {});
+
 /// One row of the journal.
 class EventRow extends StatelessWidget {
   const EventRow({
@@ -443,9 +450,6 @@ class EventRow extends StatelessWidget {
           add(l10n.returnOnce, null);
           add(l10n.donTExclude, null);
         }
-      case 'dns/failed' || 'dns/failedOnNode':
-        if (live) addCheckNow();
-        addOpen();
       case 'sub/failed':
         if (live && host.catalog.sourcesData['${dd['source']}']?.kind == 'sub') {
           add(l10n.retry, () => host.updateSource('${dd['source']}'));
@@ -516,8 +520,9 @@ class EventRow extends StatelessWidget {
       default:
         break;
     }
-    // "does not open": the site can be copied and made a rule whenever the event names one
-    final site = e.cat == 'site' ? words.host(dd) : '';
+    // "does not open": a single site event is a card (siteCard, its own actions); only a group row of site
+    // consequences (no head event, no card) keeps these buttons
+    final site = e.cat == 'site' && g.isGroup ? words.host(dd) : '';
     if (site.isNotEmpty) {
       // an event that opens again (`data.reopened`) is closed: no more Check again / Create rule
       final reopened = dd['reopened'] != null && dd['reopened'] != false;
@@ -563,7 +568,181 @@ class EventRow extends StatelessWidget {
           };
     const folded = 3;
 
-    final body = Column(
+    // ── the generic card (dns/*, site/unreachable, site/blocked) and the DNS block of net/switched ──
+    String nodeLabel(String key) => words.serverLabel(key).name;
+    String sourceLabel(String sid) => words.source(sid);
+    // "go": the node's subscription in Nodes (else the Route); the row is remembered for Back
+    void goNode(String key) {
+      final sid = key.split('::').first, toEntry = links.openNodesEntry;
+      if (toEntry != null && host.catalog.sourcesData[sid] != null) {
+        toEntry(sid);
+        leave();
+      } else if (links.openRoute != null) {
+        links.openRoute!(node: key);
+        leave();
+      }
+    }
+
+    final dnsCtx = DnsCardCtx(
+      l: l10n,
+      repeats: rep,
+      nodeLabel: nodeLabel,
+      sourceLabel: sourceLabel,
+      causeTitle: (id) {
+        final x = logs.feed.list.where((x) => x.id == id).firstOrNull;
+        return x == null ? null : words.describe(x).title;
+      },
+      onDetails: () => logs.toggleRow(g.key),
+      onDnsSettings: (_) {
+        final f = links.openDns;
+        if (f == null) return;
+        f();
+        leave();
+      },
+      onOpenEvent: (id) {
+        // the Network event: the shell's link when wired, else a jump inside this journal; Back returns here
+        final f = links.openLogsEvent;
+        if (f != null) {
+          f(id);
+          leave();
+        } else if (onJump != null) {
+          onJump!(id);
+          leave();
+        }
+      },
+      onGoNode: goNode,
+    );
+    final netBlocks = e.cat == 'net' && e.type == 'switched' ? netDnsBlocks(e, dnsCtx) : const <CardBlock>[];
+
+    // "Ignore site ▾": Everywhere / On this route only (not kept anywhere yet: dimmed), Ignored sites…
+    Future<void> ignoreMenu(String site) async {
+      final box = context.findRenderObject() as RenderBox?;
+      if (box == null) return;
+      final o = box.localToGlobal(Offset.zero), screen = MediaQuery.sizeOf(context);
+      final picked = await showMenu<String>(
+        context: context,
+        popUpAnimationStyle: AnimationStyle.noAnimation,
+        position: RelativeRect.fromLTRB(o.dx + 14, o.dy + box.size.height - 110, screen.width - o.dx - box.size.width, 0),
+        items: [
+          CheckedPopupMenuItem(value: 'all', checked: logs.isSiteIgnored(site), child: Text(l10n.everywhere)),
+          CheckedPopupMenuItem(enabled: false, value: 'route', checked: false, child: Text(l10n.onThisRouteOnly)),
+          const PopupMenuDivider(),
+          PopupMenuItem(value: 'list', child: Text(l10n.ignoredSites2)),
+        ],
+      );
+      if (!context.mounted) return;
+      switch (picked) {
+        case 'all':
+          if (logs.isSiteIgnored(site)) {
+            logs.unignoreSite(IgnoredSites.clean(site));
+          } else {
+            ignoreSiteWithUndo(ScaffoldMessenger.of(context), l10n, logs, site);
+          }
+        case 'list':
+          await showIgnoredSites(context, logs);
+      }
+    }
+
+    EventCardModel? model;
+    if (e.cat == 'dns') {
+      model = dnsCard(e, dnsCtx);
+    } else if (e.cat == 'site' && !g.isGroup) {
+      final siteHost = words.host(dd);
+      final pkg = words.appPkg(dd);
+      final v = dd['viaTarget'] ?? dd['via'];
+      final viaT = v == null || '$v'.isEmpty ? null : '$v';
+      final port = dd['port'] is num ? (dd['port'] as num).toInt() : null;
+      model = siteCard(
+        e,
+        SiteCardCtx(
+          l: l10n,
+          words: words,
+          repeats: rep,
+          background: e.bg,
+          nodeLabel: nodeLabel,
+          sourceLabel: sourceLabel,
+          nodeInfo: (key) {
+            final n = host.catalog.nodeOfKey(key);
+            if (n == null) return null;
+            return (sub: sourceLabel(key.split('::').first), proto: words.serverLabel(key).protocol, node: n.name);
+          },
+          ruleFor: (h) {
+            if (pkg.isNotEmpty) return null; // an app event has its own rule row
+            for (final id in rulesCatching(host.catalog, h, port: port)) {
+              final r = host.catalog.rulesData[id];
+              if (r == null) continue;
+              final route = actText(l10n, host.catalog, r.action, '');
+              return (id: id, route: route, target: r.action == 'direct' || r.action == 'block' ? '' : words.target(r.target.isEmpty ? 'proxy' : r.target));
+            }
+            return null;
+          },
+          onDetails: () => logs.toggleRow(g.key),
+          onIgnore: () => ignoreMenu(siteHost),
+          onOpenApp: () {
+            // the dialog of the app: through the app-rule link when wired, else the plain app link
+            final g = links.openAppRule, f = links.openAppAct;
+            if (g != null) {
+              g(app: pkg);
+            } else if (f != null) {
+              f(pkg);
+            } else {
+              return;
+            }
+            leave();
+          },
+          onOpenAppRule: (app, id) {
+            final f = links.openAppRule;
+            if (f == null) return;
+            f(app: app, ruleId: id);
+            leave();
+          },
+          onNewAppRule: (app, h, via) {
+            final f = links.openAppRule;
+            if (f == null) return;
+            f(app: app, host: h, via: via.isEmpty ? null : via);
+            leave();
+          },
+          onOpenRule: (id) {
+            final f = links.openRuleForm;
+            if (f == null) return;
+            f(id);
+            leave();
+          },
+          onCreateRule: () => links.newRuleFor?.call(host: siteHost, via: viaT),
+          onGoNode: goNode,
+          onRecheckNode: (_) async {
+            // one check at a time per event: a press while it runs does nothing
+            if (_rechecking.value.contains(e.id)) return;
+            _rechecking.value = {..._rechecking.value, e.id};
+            try {
+              await host.recheckSite(e.id);
+            } finally {
+              _rechecking.value = {..._rechecking.value}..remove(e.id);
+            }
+          },
+          onRecheckChecker: () => host.checkSite(e.id),
+        ),
+      );
+    }
+    // the card builders leave the time to us (the group's last occurrence)
+    if (model != null && model.time == null) {
+      final m = model;
+      model = EventCardModel(
+        level: m.level,
+        icon: m.icon,
+        time: words.clock(g.lastAt),
+        repeats: m.repeats,
+        background: m.background,
+        title: m.title,
+        transition: m.transition,
+        blocks: m.blocks,
+        cause: m.cause,
+        actions: m.actions,
+      );
+    }
+
+    late final Widget Function(Iterable<(String, VoidCallback?)> more, {bool card}) detailsPanel; // set below the row
+    Widget buildBody() => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
@@ -672,8 +851,14 @@ class EventRow extends StatelessWidget {
               children: [for (final a in acts.take(folded)) actWidget(a)],
             ),
           ),
-        if (open)
-          Container(
+        for (final b in netBlocks)
+          Padding(padding: const EdgeInsets.only(top: 4), child: CardBlockView(block: b)),
+        if (open) detailsPanel(acts.skip(folded)),
+      ],
+    );
+
+    // the opened fields box, shared by the old row and the card
+    detailsPanel = (Iterable<(String, VoidCallback?)> more, {bool card = false}) => Container(
             margin: const EdgeInsets.only(top: 8),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
@@ -682,6 +867,8 @@ class EventRow extends StatelessWidget {
             ),
             child: Column(
               children: [
+                // the card's details: Why (the event's fields, checks, repeats) and Raw (the log and the type buttons)
+                if (card) _Section(l10n.why),
                 for (final (k, v) in words.fields(g))
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 2),
@@ -744,6 +931,7 @@ class EventRow extends StatelessWidget {
                       ),
                     ),
                 ],
+                if (card) _Section(l10n.raw),
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Align(
@@ -752,7 +940,7 @@ class EventRow extends StatelessWidget {
                       spacing: 6,
                       runSpacing: 6,
                       children: [
-                        for (final a in acts.skip(folded)) actWidget(a),
+                        for (final a in more) actWidget(a),
                         if (rawLine != null) EventAct(l10n.inRawLog, key: const ValueKey('evRaw'), onTap: rawLine),
                         // the type of this event: take it out of the journal, or look at it alone
                         // (`user/*` is outside the type filter: «Show my actions» rules it)
@@ -774,9 +962,36 @@ class EventRow extends StatelessWidget {
                 ),
               ],
             ),
+          );
+
+    // the generic card, when the event has the data for it (older records fall through to the row below)
+    if (model != null) {
+      return HitFlash(
+        token: hit,
+        child: Material(
+          color: Colors.transparent,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // a retry of a Checked row shows its progress over the card; a tap on the card opens the event
+              ValueListenableBuilder<Set<int>>(
+                valueListenable: _rechecking,
+                builder: (_, busy, _) => busy.contains(e.id)
+                    ? const LinearProgressIndicator(key: ValueKey('evRecheckBusy'), minHeight: 2)
+                    : const SizedBox.shrink(),
+              ),
+              InkWell(
+                onTap: () => logs.toggleRow(g.key),
+                splashFactory: NoSplash.splashFactory,
+                highlightColor: Colors.transparent,
+                child: EventCard(model: model),
+              ),
+              if (open) Padding(padding: const EdgeInsets.fromLTRB(14, 0, 14, 12), child: detailsPanel(const [], card: true)),
+            ],
           ),
-      ],
-    );
+        ),
+      );
+    }
 
     return HitFlash(
       token: hit,
@@ -807,7 +1022,7 @@ class EventRow extends StatelessWidget {
                   child: Icon(eventIcon(e.cat), size: 16, color: tone),
                 ),
                 const SizedBox(width: 10),
-                Expanded(child: body),
+                Expanded(child: buildBody()),
               ],
             ),
           ),

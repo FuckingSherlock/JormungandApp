@@ -14,6 +14,7 @@ import 'package:test/test.dart';
 /// The catalog types the app has no words for yet (`typeLabel` in app/lib/core/event_text.dart):
 /// a debt for the Flutter stage (label + ARB en / ru + the sentence of the event), not a state to
 /// keep. A type that gets its label must leave this list (the test says so).
+/// Empty: dns/down, dns/up, dns/transport have their labels in event_text.dart now.
 const pendingLabels = <String>{};
 
 /// Types in the catalog that no code of this repository writes: the mockup writes them.
@@ -153,10 +154,27 @@ void main() {
       expect(
           journalOnly.keys,
           containsAll([
-            'dns/failedOnNode', 'core/deprecated', 'speed/failed', 'core/updateFailed', 'core/updateDeltaFailed',
+            'core/deprecated', 'speed/failed', 'core/updateFailed', 'core/updateDeltaFailed',
             'core/updateChannelEmpty', 'sub/diverged', 'net/switched', 'core/down', 'core/crashed', 'core/restartFailed',
             'node/lost', 'node/back',
           ]));
+    });
+
+    test('DNS types: dns/down, dns/up, dns/transport (and dns/switched) are in the catalog; dns/failed, dns/failedOnNode are not', () {
+      expect(catalog, containsAll(['dns/down', 'dns/up', 'dns/transport', 'dns/switched']));
+      expect(catalog, isNot(contains('dns/failed')));
+      expect(catalog, isNot(contains('dns/failedOnNode')));
+    });
+
+    test('dns/down notifies as dnsFailed; dns/failed has no notification kind any more', () {
+      expect(eventNotifKind['dns/down'], 'dnsFailed');
+      expect(eventNotifKind.containsKey('dns/failed'), isFalse);
+    });
+
+    test('dns/up is the up-half of a pair: a notification kind like conn/vpnUp, never journal only', () {
+      expect(eventNotifKind.containsKey('conn/vpnUp'), isTrue, reason: 'the reference pair: conn/vpnUp notifies');
+      expect(eventNotifKind.containsKey('dns/up'), isTrue, reason: 'dns/up follows conn/vpnUp (lead decision: notification kind)');
+      expect(journalOnly.containsKey('dns/up'), isFalse, reason: 'a notifying type is not journal only');
     });
 
     test('node/lost and node/back are in the catalog under node, next to node/addressMissing', () {

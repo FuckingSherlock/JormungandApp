@@ -84,8 +84,9 @@ class EventWords {
     'rules/ruleSetFailed' => l10n.ruleSetNotDownloaded,
     'rules/ruleSetUpdated' => l10n.ruleSetUpdated,
     'dns/switched' => l10n.dnsServerSwitched,
-    'dns/failed' => l10n.dnsServerDoesNotAnswer,
-    'dns/failedOnNode' => l10n.dnsServerDoesNotAnswerOn,
+    'dns/down' => l10n.dnsDoesNotAnswer,
+    'dns/up' => l10n.dnsAnswersAgain,
+    'dns/transport' => l10n.dnsTransportChanges,
     'node/addressMissing' => l10n.serverAddressDoesNotExist,
     'speed/done' => l10n.speedTestFinished,
     'speed/failed' => l10n.speedTestFailed,
@@ -699,12 +700,6 @@ class EventWords {
             : d['reason'] == 'back'
             ? l10n.answersAgainReturnedToIt(dnsName(d['to']))
             : l10n.switchAutomaticallyIsOffTheFirst,
-      ),
-      ('dns', 'failed') => r(l10n.dnsServerDoesNotAnswer2(dnsName(d['server']))),
-      ('dns', 'failedOnNode') => r(
-        d['via'] != null && '${d['via']}'.isNotEmpty
-            ? l10n.dnsServerDoesNotAnswerThrough(dnsName(d['server']), server(d['node']), server(d['via']))
-            : l10n.dnsServerDoesNotAnswer2(dnsName(d['server'])),
       ),
       ('speed', 'done') => () {
         String mbps(Object? bps) {
@@ -1501,7 +1496,6 @@ class EventWords {
   String fieldValue(String k, Object? v, EventRecord e) {
     if (e.cat == 'dns') {
       if (k == 'from' || k == 'to') return dnsName(v);
-      if (e.type == 'failedOnNode' && (k == 'node' || k == 'via')) return server(v);
       if (k == 'reason') {
         return switch (v) {
           'failover' => l10n.itStoppedAnswering,

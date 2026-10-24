@@ -42,6 +42,36 @@ EventRecord conseq(int id, String cat, String type, {required int at, int? cause
 
 List<int> ids(EventGroup g) => [for (final e in g.items) e.id];
 
+/// dns/down data as the core writes it: sides [{side, servers, selected}].
+Map<String, dynamic> downData(String side) => {
+  'sides': [
+    {'side': side, 'selected': 'p1', 'servers': <dynamic>[]},
+  ],
+  'noSpare': true,
+};
+
+/// dns/switched data: sides [{side, from: {provider, silent, since}, to: {provider, kind, ms}}].
+Map<String, dynamic> switchedData(String side, {String to = 'p2', int ms = 0, int since = 0}) => {
+  'reason': 'failed',
+  'sides': [
+    {
+      'side': side,
+      'from': {'provider': 'p1', 'name': 'p1', 'silent': ['doh'], 'since': since},
+      'to': {'provider': to, 'name': to, 'kind': 'udp', 'ms': ms},
+    },
+  ],
+  'same': false,
+};
+
+/// dns/transport data: sides [{side, provider, name, from: [kind], to: kind, ms}].
+Map<String, dynamic> transportData(String side, {String provider = 'p1', int ms = 0}) => {
+  'sides': [
+    {'side': side, 'provider': provider, 'name': provider, 'from': ['doh'], 'to': 'udp', 'ms': ms},
+  ],
+  'same': false,
+  'cause': {'kind': 'transport', 'a': 'doh', 'b': 'udp'},
+};
+
 void main() {
   group('root -> consequences (cause)', () {
     test('a root and its consequences are one row; the row says how many and when the last came', () {
@@ -81,7 +111,7 @@ void main() {
       final before = [
         ev(1, 'conn', 'offline', at: 0, level: 'warn'),
         ev(2, 'core', 'sysProxy', at: 1 * min, data: {'on': true}),
-        ev(3, 'dns', 'failed', at: 2 * min, level: 'warn', data: {'server': 'd'}),
+        ev(3, 'dns', 'down', at: 2 * min, level: 'error', data: downData('vpn')),
       ];
       final a = foldEvents(before);
       final b = foldEvents([...before, conseq(4, 'conn', 'lost', at: 5 * min, cause: 1)]);
@@ -116,9 +146,9 @@ void main() {
     test('rows of different roots do not mix; every event is in exactly one row', () {
       final all = [
         ev(1, 'conn', 'offline', at: 0, level: 'warn'),
-        ev(2, 'dns', 'failed', at: 1, level: 'warn', data: {'server': 'd'}),
+        ev(2, 'dns', 'down', at: 1, level: 'error', data: downData('vpn')),
         conseq(3, 'conn', 'lost', at: 2, cause: 1),
-        conseq(4, 'dns', 'failedOnNode', at: 3, cause: 2, data: {'server': 'd', 'node': 'n'}),
+        conseq(4, 'dns', 'switched', at: 3, cause: 2, data: switchedData('vpn')),
         ev(5, 'user', 'mode', at: 4, own: true, data: {'value': 'tun'}),
         ev(6, 'core', 'deprecated', at: 5),
       ];
@@ -193,6 +223,25 @@ void main() {
       expect([for (final g in rows) g.head!.id], [1, 2, 3]);
       expect(rows.first.closedById, 3);
       expect(rows.first.closedAfter, 2 * min);
+    });
+
+    test('dns/down is closed by the dns/up that opens on it: the closer is a row of its own, the gap is the duration', () {
+      final rows = foldEvents([
+        ev(1, 'dns', 'down', at: 0, level: 'error', data: downData('vpn')),
+        ev(2, 'dns', 'up', at: 5 * min, opens: 1, data: {
+          'afterMs': 5 * min,
+          'sides': [
+            {'side': 'vpn', 'provider': 'p1', 'name': 'p1', 'kind': 'doh'},
+          ],
+        }),
+      ]);
+      expect([for (final g in rows) g.head!.id], [1, 2]);
+      expect(rows.first.closed, isTrue);
+      expect(rows.first.closedById, 2);
+      expect(rows.first.closedAfter, 5 * min);
+      expect(rows.first.level, 'error', reason: 'the worst of its events; the UI paints it resolved');
+      expect(rows.last.opensId, 1);
+      expect(rows.last.closedById, isNull, reason: 'a closing event closes nothing');
     });
   });
 
@@ -274,7 +323,7 @@ void main() {
     test('an operation row stays in place when its later events come', () {
       final rows = foldEvents([
         ev(1, 'sub', 'updated', at: 0, opId: 'o', opKind: 'subUpdate', data: {'source': 's'}),
-        ev(2, 'dns', 'failed', at: 1, level: 'warn', data: {'server': 'd'}),
+        ev(2, 'dns', 'down', at: 1, level: 'error', data: downData('vpn')),
         ev(3, 'sub', 'removed', at: 2, opId: 'o', opKind: 'subUpdate', level: 'warn', data: {'source': 's'}),
       ]);
       expect([for (final g in rows) g.head!.id], [1, 2]);
@@ -433,6 +482,64 @@ void main() {
       // whichever row the roots make, no event is lost and the consequences are under a root, not rows of their own
       expect([for (final g in rows) ...ids(g)]..sort(), [1, 2, 3, 4]);
       expect(rows.every((g) => g.head != null && g.head!.cause == null), isTrue);
+    });
+  });
+
+  group('DNS events fold by their sides (and providers), not by the numbers', () {
+    test('two dns/down of the same side within 10 minutes are one row; another side is a row of its own', () {
+      final same = foldEvents([
+        ev(1, 'dns', 'down', at: 0, level: 'error', data: downData('vpn')),
+        ev(2, 'dns', 'down', at: 1 * min, level: 'error', data: downData('vpn')),
+      ]);
+      expect(same, hasLength(1));
+      expect(ids(same.single), [1, 2]);
+      expect(same.single.times, 2);
+
+      final other = foldEvents([
+        ev(1, 'dns', 'down', at: 0, level: 'error', data: downData('vpn')),
+        ev(2, 'dns', 'down', at: 1 * min, level: 'error', data: downData('direct')),
+      ]);
+      expect(other, hasLength(2));
+    });
+
+    test('dns/switched: the same side and providers fold even when ms and since differ; another provider or side does not', () {
+      final same = foldEvents([
+        ev(1, 'dns', 'switched', at: 0, level: 'warn', data: switchedData('vpn', ms: 40)),
+        ev(2, 'dns', 'switched', at: 1 * min, level: 'warn', data: switchedData('vpn', ms: 90, since: 1 * min)),
+      ]);
+      expect(same, hasLength(1));
+      expect(same.single.times, 2);
+
+      final rows = foldEvents([
+        ev(1, 'dns', 'switched', at: 0, level: 'warn', data: switchedData('vpn', to: 'p2')),
+        ev(2, 'dns', 'switched', at: 1 * min, level: 'warn', data: switchedData('vpn', to: 'p3')),
+        ev(3, 'dns', 'switched', at: 2 * min, level: 'warn', data: switchedData('direct', to: 'p2')),
+      ]);
+      expect(rows, hasLength(3));
+    });
+
+    test('dns/transport: the same side and provider fold even when ms differs; another provider does not', () {
+      final same = foldEvents([
+        ev(1, 'dns', 'transport', at: 0, data: transportData('vpn', ms: 10)),
+        ev(2, 'dns', 'transport', at: 1 * min, data: transportData('vpn', ms: 30)),
+      ]);
+      expect(same, hasLength(1));
+      expect(same.single.times, 2);
+
+      final other = foldEvents([
+        ev(1, 'dns', 'transport', at: 0, data: transportData('vpn', provider: 'p1')),
+        ev(2, 'dns', 'transport', at: 1 * min, data: transportData('vpn', provider: 'p2')),
+      ]);
+      expect(other, hasLength(2));
+    });
+
+    test('an old journal record of a removed type (dns/failed, dns/failedOnNode) is read and folds: its cause still joins the row', () {
+      final rows = foldEvents([
+        ev(1, 'dns', 'failed', at: 0, level: 'warn', data: {'server': 'd'}),
+        ev(2, 'dns', 'failedOnNode', at: 1, level: 'warn', cause: 1, data: {'server': 'd', 'node': 'n'}),
+      ]);
+      expect(rows, hasLength(1));
+      expect(ids(rows.single), [1, 2]);
     });
   });
 

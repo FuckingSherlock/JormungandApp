@@ -90,10 +90,11 @@ void main() {
 
   Future<void> openLogs(WidgetTester tester) async {
     await tester.tap(find.byIcon(AppTab.logs.icon));
-    await tester.pumpAndSettle();
+    // a node row of a site card is a MarqueeText: the long test-font name scrolls for ever, so pump by time
+    await tester.pump(const Duration(milliseconds: 600));
   }
 
-  testWidgets('a "does not open" event: copy is there, Create rule is not (no working target, decision 2026-10-21)', (
+  testWidgets('a "does not open" event is the site card: Details and Ignore site buttons, Create <host> rule row; no Copy / Check again', (
     tester,
   ) async {
     final host = _hostWithSimpleChain();
@@ -106,15 +107,13 @@ void main() {
     await pumpApp(tester, host);
     await openLogs(tester);
 
-    // no Create rule: the folded row's three slots are Check with checker, Ignore site and Copy site
-    expect(find.text('Check with checker'), findsOneWidget);
-    expect(find.text('Create rule'), findsNothing);
-    expect(find.text('Ignore site'), findsOneWidget);
-    expect(find.text('Copy site'), findsOneWidget);
-    await tester.tap(find.textContaining('example.org').first);
-    await tester.pumpAndSettle();
-    expect(find.text('Copy site'), findsOneWidget);
-    expect(find.text('Create rule'), findsNothing);
+    // connect-model «Карточка сайта»: the buttons are Details ▾ and Ignore site ▾; the rule is a row of the data box
+    expect(find.text('Details ▾'), findsOneWidget);
+    expect(find.text('Ignore site ▾'), findsOneWidget);
+    expect(find.text('Create example.org rule'), findsOneWidget);
+    expect(find.text('Check with checker'), findsNothing);
+    expect(find.text('Check again'), findsNothing);
+    expect(find.text('Copy site'), findsNothing);
   });
 
   testWidgets('a blocked event with viaTarget (the scout is a node of the failing entry): Create rule targets that node, named "<host> via <node>"', (
@@ -132,32 +131,9 @@ void main() {
     // so the page never "settles"; pump by time instead
     await tester.tap(find.byIcon(AppTab.logs.icon));
     await tester.pump(const Duration(milliseconds: 600));
-    await tester.tap(find.text('Create rule'));
+    await tester.tap(find.text('Create example.org rule'));
     await tester.pump(const Duration(milliseconds: 600));
     expect(find.widgetWithText(TextField, 'example.org via Alpha one'), findsOneWidget);
-  });
-
-  testWidgets('Copy site shows the toast', (tester) async {
-    final host = _hostWithSimpleChain();
-    host.addEvent(
-      'site',
-      'unreachable',
-      level: 'warn',
-      data: {'host': 'example.org', 'entry': 'c1', 'tried': const []},
-    );
-    await pumpApp(tester, host);
-    await openLogs(tester);
-    // Copy site is in the opened row only
-    await tester.tap(find.textContaining('example.org').first);
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Copy site'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Copy site'));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-    expect(find.textContaining('copied'), findsOneWidget);
-    await tester.pumpAndSettle(const Duration(seconds: 5));
   });
 
   testWidgets('Open on a Simple chain goes to the Simple tab, not Profiles', (tester) async {

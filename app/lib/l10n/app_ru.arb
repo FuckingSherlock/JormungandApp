@@ -1535,7 +1535,6 @@
   "saveAs": "Сохранить как…",
   "theFolderYouSavedToBefore": "Папка, куда сохраняли раньше, удалена или больше не разрешена. Выберите другую.",
   "theFolderYouSavedToBefore2": "Папка, куда сохраняли раньше, удалена. Выберите, куда сохранить файл.",
-  "dnsServerDoesNotAnswerOn": "DNS-сервер не отвечает на этом узле",
   "doesNotAnswerThroughItAnswers": "Не отвечает через {s0}; отвечает через {s1}",
   "deadOnThisNode": "Недоступен на этом узле",
   "reserve": "Резерв",
@@ -1558,5 +1557,7 @@
   "ruleIsBlocked": "Правило {s0} заблокировано",
   "appIsBlocked": "Приложение {s0} заблокировано",
   "ifUnavailableIsDefault": "Для «If unavailable» выбрано Default",
-  "release": "Релиз"
+  "release": "Релиз",
+  "didNotOpenOnServersPlural": "{n1, plural, one{{s0} did not open on {n1} server} few{{s0} did not open on {n1} servers} many{{s0} did not open on {n1} servers} other{{s0} did not open on {n1} servers}}",
+  "opensOnOfNodesPlural": "{n0, plural, one{opens on {n0} of {n1} node} few{opens on {n0} of {n1} nodes} many{opens on {n0} of {n1} nodes} other{opens on {n0} of {n1} nodes}}"
 }

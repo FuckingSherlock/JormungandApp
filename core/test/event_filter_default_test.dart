@@ -1,4 +1,4 @@
-// The Events filter starts with the types in defaultOffTypes switched off (sub/diverged: still journaled and in Raw).
+// The Events filter starts with the types in defaultOffTypes switched off (sub/diverged and dns/transport: still journaled and in Raw).
 // count and offCats measure the difference from that default, so a fresh filter counts nothing and reset() goes
 // back to the default, not to empty.
 import 'package:jormungand_core/jormungand_core.dart';
@@ -14,13 +14,27 @@ String noText(EventRecord x) => '';
 void main() {
   final diverged = e(ev(1, 'sub', 'diverged', data: {'source': 's1'}));
   final updated = e(ev(2, 'sub', 'updated', data: {'source': 's1', 'total': 3}));
+  final transport = e(ev(4, 'dns', 'transport', data: {'sides': [], 'same': false}));
+  final down = e(ev(5, 'dns', 'down', data: {'sides': [], 'noSpare': true}));
 
-  test('defaultOffTypes is sub/diverged, and the filter starts with exactly that switched off', () {
-    expect(defaultOffTypes, {'sub/diverged'});
+  test('defaultOffTypes is sub/diverged and dns/transport, and the filter starts with exactly those switched off', () {
+    expect(defaultOffTypes, {'sub/diverged', 'dns/transport'});
     final f = EventFilter();
     expect(f.off, defaultOffTypes);
     expect(f.visible(diverged, showOwn: false, text: noText), isFalse, reason: 'hidden by default');
+    expect(f.visible(transport, showOwn: false, text: noText), isFalse, reason: 'dns/transport hidden by default');
     expect(f.visible(updated, showOwn: false, text: noText), isTrue, reason: 'the other sub types are shown');
+    expect(f.visible(down, showOwn: false, text: noText), isTrue, reason: 'dns/down is not hidden by default');
+  });
+
+  test('switching dns/transport on counts its category once, switching it back off is the default again', () {
+    final f = EventFilter()..toggleType('dns/transport');
+    expect(f.visible(transport, showOwn: false, text: noText), isTrue);
+    expect(f.count, 1);
+    expect(f.offCats.map((c) => c.$1), ['dns']);
+    f.toggleType('dns/transport');
+    expect(f.count, 0);
+    expect(f.visible(transport, showOwn: false, text: noText), isFalse);
   });
 
   test('a fresh filter counts nothing and has no category off', () {
@@ -31,9 +45,9 @@ void main() {
 
   test('the filter gets its own copy of the default: changing it leaves defaultOffTypes and new filters alone', () {
     final f = EventFilter()..off.add('conn/lost');
-    expect(f.off, containsAll(['sub/diverged', 'conn/lost']));
-    expect(defaultOffTypes, {'sub/diverged'});
-    expect(EventFilter().off, {'sub/diverged'});
+    expect(f.off, containsAll(['sub/diverged', 'dns/transport', 'conn/lost']));
+    expect(defaultOffTypes, {'sub/diverged', 'dns/transport'});
+    expect(EventFilter().off, {'sub/diverged', 'dns/transport'});
   });
 
   test('switching sub/diverged on counts its category once; switching it back off is the default again', () {

@@ -1167,9 +1167,13 @@ class CoreService implements CoreApi {
     try {
       // told at once (the events of the gap get its cause); the new network's provider joins when the lookup returns
       final sw = _netSwitches.onSettled();
-      if (sw == null || _disposed) return;
+      if (sw == null || _disposed) {
+        _flushDnsHeld(); // no network switch: the DNS changes held meanwhile are their own events
+        return;
+      }
       final id = eventBook.add('net', 'switched', 'info', data: sw.data);
       _netSwitch = (id: id, epoch: epoch, at: _nowMs);
+      _drainDnsHeld(id); // the DNS changes of the unstable time are a block of this event
       final full = await sw.completed;
       if (full != null && !_disposed) eventBook.update(id, data: full);
     } catch (e) {
@@ -1961,8 +1965,10 @@ class CoreService implements CoreApi {
         if (prev != null) {
           final d = prev['data'] as Map<String, dynamic>;
           eventBook.repeated(prev['id'] as int, data: {'route': s.route, 'from': d['from'] ?? s.from, 'to': s.to}, level: 'info', cause: (prev['cause'] as num?)?.toInt());
+          _lastAutoMove = (id: prev['id'] as int, at: _nowMs);
         } else {
-          eventBook.add('auto', 'fastest', 'info', data: {'route': s.route, 'from': s.from, 'to': s.to}, cause: _netCause());
+          final fid = eventBook.add('auto', 'fastest', 'info', data: {'route': s.route, 'from': s.from, 'to': s.to}, cause: _netCause());
+          _lastAutoMove = (id: fid, at: _nowMs);
         }
       } else {
         // a move back closes the failover of the same route (or, for a route move, the same Auto)
@@ -1977,6 +1983,7 @@ class CoreService implements CoreApi {
             data: {'route': ?s.route, 'from': s.from, 'to': s.to, 'reason': s.reason},
             opens: s.reason == 'back' ? _autoFailoverIds.remove(key) : null,
             cause: s.reason == 'back' ? null : cause);
+        _lastAutoMove = (id: id, at: _nowMs);
         if (failover) {
           _autoFailoverIds[key] = id;
           _autoSeries[key] = (id: cause ?? id, at: _nowMs);
@@ -2610,6 +2617,7 @@ class CoreService implements CoreApi {
     final off = {for (final e in _dnsFlagMemory.entries) if (!e.value && byId.containsKey(e.key) && !reserve.contains(e.key)) e.key};
     final dns = _dns = DnsFailover(
         clock: () => _nowMs,
+        timer: _timer,
         sides: _dnsSides,
         candidates: _dnsCandidates,
         watch: _dnsExtra,
@@ -2635,28 +2643,283 @@ class CoreService implements CoreApi {
         auto: _dnsAuto,
         pool: pool,
         note: logBook.note,
+        nameOf: (p) => _dnsName(p) ?? p,
+        describeNode: _describeNode,
         flagWait: dnsFlagWait,
         flagPoll: dnsFlagPoll);
     if (off.isNotEmpty) logBook.note('info', 'dns: flags off again after the restart: ${off.join(', ')}');
-    dns.switches.listen((s) {
-      // a move back closes the failover of the same side
-      final id = _event('dns', 'switched', 'info', {
-        'side': s.side,
-        'from': s.from,
-        'to': s.to,
-        'fromProvider': s.fromProvider,
-        'toProvider': s.toProvider,
-        'reason': s.reason,
-      },
-          own: s.reason == 'off',
-          opens: s.reason == 'back' ? _dnsFailoverIds.remove(s.side) : null,
-          // another exit node is the failure of the node left (its incident), a failover in the window of a switch is the switch's
-          cause: s.reason == 'node'
-              ? (_nodeIncidents.values.where((i) => _nowMs - i.at <= 120000).map((i) => i.id).firstOrNull ?? _netCause())
-              : s.reason == 'failover' ? _netCause() : null);
-      if (s.reason == 'failover') _dnsFailoverIds[s.side] = id;
-    });
+    dns.switches.listen(_onDnsChange);
+    dns.transports.listen(_onDnsChange);
+    dns.outages.listen(_onDnsOutage);
     dns.start();
+  }
+
+  // ---- DNS events (docs/logs.md → «DNS-события: состав и карточки») ----
+
+  /// How long after its own event an external cause (a reconnect, a core restart, Auto's move to another exit node, the
+  /// failure of a node) still explains a DNS event.
+  static const _dnsCauseTail = Duration(minutes: 2);
+
+  /// How long the DNS changes of an unstable network wait for it to settle; past it they are written as their own events.
+  static const _dnsHoldMax = Duration(minutes: 2);
+
+  /// The reasons of a switch that can belong to a network change (`net/switched` takes them into its `dns`): the server
+  /// failed or came back, the race found another winner. Another exit node and «Switch automatically off» are not the network's.
+  static const _dnsNetReasons = {'failover', 'back', 'race'};
+
+  /// The last events a DNS event can name as its cause: a reconnect, a restart of the core, Auto's move of the exit node.
+  ({int id, int at})? _lastReconnect, _lastRestart, _lastAutoMove;
+
+  /// `dns/switched` and `dns/transport` held while the network is unstable ([DnsSwitch] / [DnsTransportChange]).
+  final _dnsHeld = <Object>[];
+  Timer? _dnsHoldTimer;
+
+  /// The `dns` block of the `net/switched` event [id] so far: what its window took in.
+  ({int id, List<Map<String, Object?>> switches, List<Map<String, Object?>> transports, bool same, Map<String, Map<String, Object?>> before, Map<String, Map<String, Object?>> after})? _netDns;
+
+  /// The open `dns/down` event of each side (closed by a `dns/up`).
+  final _dnsDownIds = <String, int>{};
+
+  /// Whether the event [at] (id and time) still stands and is recent enough to be a cause.
+  int? _recentCause(({int id, int at})? at) =>
+      at == null || _nowMs - at.at > _dnsCauseTail.inMilliseconds || eventBook.byId(at.id) == null ? null : _rootOf(at.id);
+
+  /// The first event of a node failure still going on ([_nodeIncidents]), or null.
+  int? _recentNodeIncident() => _nodeIncidents.values
+      .where((i) => _nowMs - i.at <= _dnsCauseTail.inMilliseconds && eventBook.byId(i.id) != null)
+      .map((i) => _rootOf(i.id))
+      .firstOrNull;
+
+  /// The cause of a DNS event outside the DNS itself, structured (`{kind, id}`); null = none. [node]: the exit node moved,
+  /// so its failure or Auto's move explains the event before the network does.
+  Map<String, Object?>? _dnsOuterCause({bool node = false}) {
+    if (node) {
+      final incident = _recentNodeIncident();
+      if (incident != null) return {'kind': 'nodeIncident', 'id': incident};
+      final auto = _recentCause(_lastAutoMove);
+      if (auto != null) return {'kind': 'autoNode', 'id': auto};
+    }
+    final net = _netCause();
+    if (net != null) return {'kind': 'net', 'id': net};
+    final re = _recentCause(_lastReconnect);
+    if (re != null) return {'kind': 'reconnect', 'id': re};
+    final restart = _recentCause(_lastRestart);
+    if (restart != null) return {'kind': 'coreRestart', 'id': restart};
+    return null;
+  }
+
+  /// `{sub, proto, node}` of the exit node the VPN side is asked through, null = not known.
+  Map<String, Object?>? _dnsRoute() {
+    final key = _auto?.exitNodeKey();
+    if (key == null) return null;
+    final d = _describeNode(key);
+    return {'sub': d?.sub, 'proto': d?.proto, 'node': key};
+  }
+
+  /// The subscription (source id, the key's prefix) and the protocol (the outbound type in the plan) of the node [key]
+  /// (`sid::nid`); null = not a node key.
+  ({String sub, String proto})? _describeNode(String key) {
+    final at = key.indexOf('::');
+    if (at < 1) return null;
+    var proto = '';
+    final plan = _plan;
+    if (plan != null) {
+      for (final r in planRoutes(plan)) {
+        for (final n in ((r['main'] as Map?)?['nodes'] as List? ?? const []).whereType<Map>()) {
+          final o = n['outbound'];
+          if (n['key'] == key && o is Map && o['type'] != null) proto = '${o['type']}';
+        }
+      }
+    }
+    return (sub: key.substring(0, at), proto: proto);
+  }
+
+  /// The name of the DNS server [provider] in Settings → DNS as the running plan holds it (`routing.dns.servers[].name`);
+  /// null = none (the failover then names it by its id).
+  String? _dnsName(String provider) {
+    final routing = _plan?['routing'];
+    final dns = routing is Map ? routing['dns'] : null;
+    for (final s in (dns is Map ? dns['servers'] as List? : null)?.whereType<Map>() ?? const <Map>[]) {
+      if (s['id'] == provider) {
+        final n = '${s['name'] ?? ''}'.trim();
+        return n.isEmpty ? null : n;
+      }
+    }
+    return null;
+  }
+
+  /// The `sides` of a DNS record as maps (the record's own `toJson`).
+  static List<Map<String, Object?>> _sidesOf(Map<String, dynamic> json) =>
+      [for (final s in (json['sides'] as List? ?? const []).whereType<Map>()) s.cast<String, Object?>()];
+
+  /// A DNS change ([DnsSwitch] or [DnsTransportChange]) of the failover: held while the network is unstable, taken into the
+  /// `net/switched` of its window, else its own event.
+  void _onDnsChange(Object c) {
+    if (_disposed) return;
+    final joinable = c is DnsTransportChange || (c is DnsSwitch && _dnsNetReasons.contains(c.reason));
+    if (joinable) {
+      _syncNetSwitch(); // (the settle that just happened writes its event first)
+      if (!sentinel.context.stable) {
+        _dnsHeld.add(c);
+        _dnsHoldTimer ??= _timer(_dnsHoldMax, _flushDnsHeld);
+        return;
+      }
+      final net = _netCause();
+      if (net != null && _joinNetDns(net, [c])) return;
+    }
+    _writeDnsChange(c);
+  }
+
+  /// The held changes become their own events (no network switch came out of the unstable time, or it took too long).
+  void _flushDnsHeld() {
+    _dnsHoldTimer?.cancel();
+    _dnsHoldTimer = null;
+    final held = [..._dnsHeld];
+    _dnsHeld.clear();
+    if (_disposed) return;
+    for (final c in held) {
+      _writeDnsChange(c);
+    }
+  }
+
+  /// The network settled on another one and wrote [netId]: the held changes go into it (nothing lost: those it cannot
+  /// take are written as their own).
+  void _drainDnsHeld(int netId) {
+    _dnsHoldTimer?.cancel();
+    _dnsHoldTimer = null;
+    final held = [..._dnsHeld];
+    _dnsHeld.clear();
+    if (held.isEmpty || _joinNetDns(netId, held)) return;
+    for (final c in held) {
+      _writeDnsChange(c);
+    }
+  }
+
+  /// Puts the changes [items] into `data.dns` of the `net/switched` event [id], with the selection of each side before the
+  /// first and after the last. False = the event is gone.
+  bool _joinNetDns(int id, List<Object> items) {
+    if (eventBook.byId(id) == null) return false;
+    var cur = _netDns;
+    if (cur == null || cur.id != id) {
+      cur = (id: id, switches: <Map<String, Object?>>[], transports: <Map<String, Object?>>[], same: true, before: <String, Map<String, Object?>>{}, after: <String, Map<String, Object?>>{});
+    }
+    var same = cur.same;
+    for (final c in items) {
+      final isSwitch = c is DnsSwitch;
+      final Map<String, dynamic> json = c is DnsSwitch ? c.toJson() : (c as DnsTransportChange).toJson();
+      same = same && json['same'] == true;
+      for (final s in _sidesOf(json)) {
+        final side = '${s['side']}';
+        if (isSwitch) {
+          cur.switches.add(s);
+          final from = s['from'], to = s['to'];
+          if (from is Map) cur.before.putIfAbsent(side, () => {'provider': from['provider'], 'name': from['name']});
+          if (to is Map) cur.after[side] = {'provider': to['provider'], 'name': to['name'], 'kind': to['kind']};
+        } else {
+          cur.transports.add(s);
+          final from = s['from'];
+          cur.before.putIfAbsent(side, () => {'provider': s['provider'], 'name': s['name'], 'kind': from is List && from.isNotEmpty ? from.first : null});
+          cur.after[side] = {'provider': s['provider'], 'name': s['name'], 'kind': s['to']};
+        }
+      }
+    }
+    cur = _netDns = (id: id, switches: cur.switches, transports: cur.transports, same: same, before: cur.before, after: cur.after);
+    eventBook.update(id, data: {
+      'dns': {
+        'switches': cur.switches,
+        'same': cur.same,
+        'transports': cur.transports,
+        'before': cur.before,
+        'after': cur.after,
+      },
+    });
+    return true;
+  }
+
+  /// `dns/switched` or `dns/transport` as its own event.
+  void _writeDnsChange(Object c) {
+    if (c is DnsSwitch) {
+      final j = c.toJson()..remove('at');
+      final sides = _sidesOf(j);
+      final sideNames = [for (final s in sides) '${s['side']}'];
+      final fromTo = sides.isEmpty ? null : sides.first;
+      final from = fromTo?['from'], to = fromTo?['to'];
+      final outer = _dnsOuterCause(node: c.reason == 'node' || c.reason == 'race') ??
+          {'kind': 'itself', 'a': from is Map ? from['name'] : null, 'b': to is Map ? to['name'] : null};
+      final route = sideNames.contains('vpn') ? _dnsRoute() : null;
+      // a move back closes the failover of the same sides
+      int? opens;
+      if (c.reason == 'back') {
+        for (final s in sideNames) {
+          opens ??= _dnsFailoverIds.remove(s);
+          _dnsFailoverIds.remove(s);
+        }
+      }
+      final id = _event('dns', 'switched', c.reason == 'failover' ? 'warn' : 'info', {
+        ...j,
+        'reason': c.reason,
+        'same': c.same,
+        'route': ?route,
+        'cause': outer,
+      }, own: c.reason == 'off', opens: opens, cause: outer['id'] as int?);
+      if (c.reason == 'failover') {
+        for (final s in sideNames) {
+          _dnsFailoverIds[s] = id;
+        }
+      }
+    } else if (c is DnsTransportChange) {
+      final j = c.toJson()..remove('at');
+      final sides = _sidesOf(j);
+      final first = sides.isEmpty ? null : sides.first;
+      final was = first?['from'];
+      final outer = _dnsOuterCause() ??
+          {'kind': 'transport', 'a': was is List && was.isNotEmpty ? was.first : null, 'b': first?['to']};
+      final route = sides.any((s) => s['side'] == 'vpn') ? _dnsRoute() : null;
+      _event('dns', 'transport', 'info', {...j, 'same': c.same, 'route': ?route, 'cause': outer}, cause: outer['id'] as int?);
+    }
+  }
+
+  /// `dns/down` (all the candidates of a side are silent) and `dns/up` (one answers again).
+  void _onDnsOutage(DnsOutage o) {
+    if (_disposed) return;
+    switch (o) {
+      case DnsDown():
+        final j = o.toJson()..remove('at');
+        final sides = _sidesOf(j);
+        final sideNames = [for (final s in sides) '${s['side']}'];
+        final outer = _dnsDownCause(j, sides) ?? _dnsOuterCause() ?? {'kind': 'none'};
+        final data = {...j, 'noSpare': o.noSpare, 'cause': outer};
+        final open = {for (final s in sideNames) _dnsDownIds[s]};
+        final prev = open.length == 1 ? open.first : null;
+        if (prev != null && eventBook.byId(prev) != null) {
+          // the same silence going on: a repeat of its event
+          eventBook.repeated(prev, data: data, level: 'error', cause: outer['id'] as int?);
+        } else {
+          final id = _event('dns', 'down', 'error', data, cause: outer['id'] as int?);
+          for (final s in sideNames) {
+            _dnsDownIds[s] = id;
+          }
+        }
+      case DnsUp():
+        final j = o.toJson()..remove('at');
+        int? opens;
+        for (final s in _sidesOf(j)) {
+          final id = _dnsDownIds.remove('${s['side']}');
+          opens ??= id != null && eventBook.byId(id) != null ? id : null;
+        }
+        _event('dns', 'up', 'info', {...j, 'afterMs': o.afterMs}, opens: opens);
+    }
+  }
+
+  /// The cause of a `dns/down` the check through another node found: the exit node is silent, a spare one answers.
+  Map<String, Object?>? _dnsDownCause(Map<String, dynamic> down, List<Map<String, Object?>> sides) {
+    final nodes = (down['nodes'] as List? ?? const []).whereType<Map>().toList();
+    final bad = nodes.where((n) => n['ok'] == false).firstOrNull, good = nodes.any((n) => n['ok'] == true);
+    if (bad == null || !good) return null;
+    final vpn = sides.where((s) => s['side'] == 'vpn').firstOrNull;
+    final servers = (vpn?['servers'] as List? ?? const []).whereType<Map>();
+    final chosen = servers.where((s) => s['provider'] == vpn?['selected']).firstOrNull ?? servers.firstOrNull;
+    return {'kind': 'node', 'node': bad['key'], 'server': chosen?['name']};
   }
 
   /// The exit node the VPN side of the DNS is checked through: Auto's server in use, else the one the plan starts on.
@@ -2776,6 +3039,8 @@ class CoreService implements CoreApi {
     }
     dns?.stop();
     _dns = null;
+    _flushDnsHeld(); // nothing waits for a network that is no longer watched
+    _dnsDownIds.clear(); // the next session's silence is a new `dns/down`
     pool.resetNetwork(); // a stop does not make the network «up» (only an answer does)
     _changed();
   }
@@ -2873,8 +3138,9 @@ class CoreService implements CoreApi {
         final crashId = _crashRoot?.eventId;
         _closeCrashRoot('restarted');
         _restartFailedId = null;
-        _event('core', 'restarted', 'info', {'attempt': _attempt, if (wasDown) 'downMs': downMs},
+        final restartedId = _event('core', 'restarted', 'info', {'attempt': _attempt, if (wasDown) 'downMs': downMs},
             note: 'sing-box started again (attempt $_attempt)', opens: crashId);
+        _lastRestart = (id: restartedId, at: _nowMs);
         _vpnSync(); // the cause `core` is over
         if (_sysWanted && !sysProxy.isSet) {
           // it was taken off while down (or released by the user): the connection is back in full
@@ -4199,12 +4465,14 @@ class CoreService implements CoreApi {
             if (oldPlan != null && (oldPlan['global'] == true) != (plan['global'] == true))
               'route': {'from': oldPlan['global'] == true ? 'global' : 'rules', 'to': plan['global'] == true ? 'global' : 'rules'},
           };
-          eventBook.add('conn', 'reconnected', 'info',
+          final rid = eventBook.add('conn', 'reconnected', 'info',
               own: own, op: reconnectOp, cause: _netCause(), data: {'reason': reconnect, if (reconnect == 'settings' && changed.isNotEmpty) 'changed': changed, 'tookMs': tookMs});
+          _lastReconnect = (id: rid, at: _nowMs);
         } else if (userOp != null) {
           _userDisconnect = null; // consumed
           final id = eventBook.add('conn', 'reconnected', 'info',
               own: true, op: userOp.op, data: {'reason': 'user', 'tookMs': tookMs, 'downMs': startedAt - userOp.at});
+          _lastReconnect = (id: id, at: _nowMs);
           run?.eventId = id;
         } else {
           final id = eventBook.add('conn', 'connected', 'info', own: own, op: freshOp, data: _connectedData(plan));

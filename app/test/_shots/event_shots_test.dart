@@ -133,8 +133,41 @@ Map<String, dynamic> _unreach({Map<String, dynamic>? check, List<Map<String, Str
   ...?more,
 };
 
+Map<String, dynamic> _dnsSide(String side, String fromP, String fromName, String toP, String toName) => {
+  'side': side,
+  'from': {'provider': fromP, 'name': fromName, 'silent': ['doh', 'dot'], 'since': _now - 12000},
+  'to': {'provider': toP, 'name': toName, 'kind': 'doh', 'ms': 41},
+};
+Map<String, dynamic> _dnsSwitched(List<Map<String, dynamic>> sides, {bool same = false}) => {
+  'reason': 'failover',
+  'sides': sides,
+  'same': same,
+  'route': {'sub': 's1', 'proto': 'vless', 'node': 's1::n1'},
+  'cause': {'kind': 'itself', 'a': 'Cloudflare', 'b': 'Google'},
+};
+Map<String, dynamic> _dnsDown({bool nodes = false}) => {
+  'sides': [
+    {
+      'side': 'vpn',
+      'servers': [
+        {'provider': 'cloudflare', 'name': 'Cloudflare', 'kinds': ['doh', 'dot']},
+        {'provider': 'google', 'name': 'Google', 'kinds': ['doh']},
+      ],
+      'selected': 'cloudflare',
+    },
+  ],
+  'noSpare': true,
+  if (nodes)
+    'nodes': [
+      {'key': 's1::n1', 'sub': 's1', 'proto': 'vless', 'ok': false},
+      {'key': 's1::n2', 'sub': 's1', 'proto': 'vless', 'ok': true},
+    ],
+  'cause': {'kind': 'none'},
+};
+
 final _events = <String, List<Ev>>{
   'site': [
+    Ev('site', 'blocked', {..._unreach(), 'via': 's2', 'viaServer': 's2::b1', 'viaMs': 340}, variant: 'карточка: blocked (открылось через другой сервер)'),
     Ev('site', 'unreachable', _unreach(check: {'state': 'opens', 'at': _now, 'ok': 2, 'total': 2, 'via': 'tunnel', 'nodes': _chk}, tried: [{'entry': 's2', 'server': 's2::b1'}]), log: 1204, variant: 'чекер: открывается из других стран (единственный вариант, который уведомляет)'),
     Ev('site', 'unreachable', _unreach(), variant: 'чекер ещё не спрашивали (нет других маршрутов)'),
     Ev('site', 'unreachable', _unreach(check: {'state': 'pending', 'at': _now}, tried: [{'entry': 's2', 'server': 's2::b1'}]), variant: 'чекер сейчас отвечает (pending)'),
@@ -169,9 +202,30 @@ final _events = <String, List<Ev>>{
     Ev('node', 'back', {'source': 's1', 'name': 'Remnawave', 'nodes': ['Helsinki 1', 'Frankfurt 1'], 'nodeCount': 2, 'affected': _affected}, level: 'info', variant: 'включил обратно (закрывает node/lost off)'),
   ],
   'dns': [
-    Ev('dns', 'failed', {'server': 'cloudflare', 'path': 'proxy', 'since': _now - 60000, 'provider': 'cloudflare', 'side': 'vpn', 'servers': ['cloudflare']}),
-    Ev('dns', 'failedOnNode', {'server': 'cloudflare', 'path': 'proxy', 'since': _now - 60000, 'provider': 'cloudflare', 'side': 'vpn', 'node': 's1::n1', 'via': 's1::n2'}),
-    Ev('dns', 'switched', {'side': 'vpn', 'from': 'cloudflare', 'to': 'google', 'reason': 'failover'}, level: 'info'),
+    Ev('dns', 'switched', _dnsSwitched([_dnsSide('vpn', 'cloudflare', 'Cloudflare', 'google', 'Google')]), variant: 'switched: VPN'),
+    Ev('dns', 'switched', _dnsSwitched([_dnsSide('direct', 'cloudflare', 'Cloudflare', 'google', 'Google')]), variant: 'switched: Direct'),
+    Ev('dns', 'switched', _dnsSwitched([_dnsSide('vpn', 'cloudflare', 'Cloudflare', 'google', 'Google'), _dnsSide('direct', 'cloudflare', 'Cloudflare', 'google', 'Google')], same: true), variant: 'switched: both sides the same'),
+    Ev('dns', 'switched', _dnsSwitched([_dnsSide('vpn', 'cloudflare', 'Cloudflare', 'google', 'Google'), _dnsSide('direct', 'quad9', 'Quad9', 'adguard', 'AdGuard')]), variant: 'switched: both sides different'),
+    Ev('dns', 'transport', {
+      'sides': [{'side': 'vpn', 'provider': 'cloudflare', 'name': 'Cloudflare', 'from': ['doh'], 'to': 'dot', 'ms': 80}],
+      'same': false,
+      'cause': {'kind': 'transport', 'a': 'doh', 'b': 'dot'},
+    }, level: 'info', variant: 'transport'),
+    Ev('dns', 'down', _dnsDown(nodes: true), level: 'error', variant: 'down: with nodes checked'),
+    Ev('dns', 'down', _dnsDown(), level: 'error', variant: 'down: cascade, no spare'),
+    Ev('dns', 'up', {
+      'afterMs': 95000,
+      'sides': [{'side': 'vpn', 'provider': 'cloudflare', 'name': 'Cloudflare', 'kind': 'doh'}],
+    }, level: 'info', variant: 'up: answers again'),
+    Ev('net', 'switched', {
+      'from': 'wifi',
+      'to': 'cellular',
+      'dns': {
+        'switches': [_dnsSide('vpn', 'cloudflare', 'Cloudflare', 'google', 'Google')],
+        'same': false,
+        'transports': const [],
+      },
+    }, level: 'info', variant: 'net switched with the DNS block'),
   ],
   'auto': [
     Ev('auto', 'switched', {'route': 's1', 'from': 's1::n1', 'to': 's1::n2', 'reason': 'failover', 'fails': 3}, level: 'info'),
@@ -378,7 +432,7 @@ AppLinks _fullLinks() => AppLinks(
   openDns: () {},
   openRuleSets: () {},
   newRuleFor: ({host, app, via}) {},
-  openRoute: ({edit = false}) {},
+  openRoute: ({edit = false, node}) {},
   openLogsEvent: (_) {},
 );
 
@@ -513,7 +567,7 @@ void main() {
 
   testWidgets('event screenshots', timeout: const Timeout(Duration(minutes: 15)), (tester) async {
     tester.view.devicePixelRatio = _ratio;
-    tester.view.physicalSize = const Size(_w * _ratio, 3200);
+    tester.view.physicalSize = const Size(_w * _ratio, 6400);
     addTearDown(tester.view.reset);
     final host = _host();
     final boundary = GlobalKey();

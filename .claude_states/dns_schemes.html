@@ -1,0 +1,324 @@
+<!-- raw-html-confirmed -->
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<title>DNS events — схемы</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--row:#1c2129;--line:#2a313c;--tx:#e6edf3;--mut:#8b949e;--acc:#3b82f6;--accbg:#13233d;--warn:#e3a008;--err:#f05252;--ok:#3fb950;--vio:#a78bfa;--viobg:#2a2342}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,Segoe UI,Roboto,sans-serif;padding:24px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:19px;margin:36px 0 6px;border-top:1px solid var(--line);padding-top:24px}
+p.note{color:var(--mut);margin:4px 0 14px;max-width:1180px}
+.grid{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}
+.col{width:380px}
+.phone{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.ev{padding:14px 14px 14px 12px;display:flex;gap:12px;border-bottom:1px solid var(--line)}
+.ev.warn{border-left:3px solid var(--warn)}.ev.err{border-left:3px solid var(--err)}.ev.okb{border-left:3px solid var(--ok)}
+.ic{width:34px;height:34px;border-radius:9px;background:var(--viobg);color:var(--vio);display:grid;place-items:center;flex:none;font-size:16px}
+.body{flex:1;min-width:0}
+.meta{color:var(--mut);font-size:13px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tag{font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px}
+.tag.w{background:#3a2c08;color:var(--warn)}.tag.e{background:#3d1414;color:var(--err)}
+.ttl{font-size:16px;font-weight:600;margin:3px 0 2px}
+.sub{color:var(--mut);font-size:13.5px}
+.box{background:var(--row);border-radius:10px;margin:10px 0 8px;overflow:hidden}
+.r{display:flex;gap:10px;padding:9px 11px;border-top:1px solid var(--line);align-items:center;font-size:14px}
+.r:first-child{border-top:0}
+.r .k{color:var(--mut);width:64px;flex:none;font-size:13px}
+.r .v{flex:1;min-width:0}.r .v small{display:block;color:var(--mut);font-size:12.5px}
+.r .chev{color:var(--mut)}
+.ev2{padding:14px;border-bottom:1px solid var(--line)}
+.ev2.warn{border-left:3px solid var(--warn)}.ev2.err{border-left:3px solid var(--err)}.ev2.okb{border-left:3px solid var(--ok)}.ev2.info{border-left:3px solid var(--line)}
+.tag.i{background:rgba(139,148,158,.15);color:var(--mut)}.tag.o{background:rgba(63,185,80,.15);color:var(--ok)}
+.ev2.okb .k2{width:46px}
+.sw{display:flex;margin:10px 0 8px;font-size:14px}.sw .c{flex:1;min-width:0;padding:8px 11px;line-height:20px}.sw .v small{display:block;color:var(--mut);font-size:12.5px;line-height:17px}
+.sw .from{background:linear-gradient(270deg,rgb(110,38,40),rgba(110,38,40,.35) 55%,rgba(110,38,40,.12));border-radius:calc(var(--rad) - 4px) 0 0 calc(var(--rad) - 4px);clip-path:polygon(0 0,calc(100% - 14px) 0,100% 50%,calc(100% - 14px) 100%,0 100%);padding-right:22px}
+.sw .to{background:linear-gradient(270deg,rgb(28,92,48),rgba(28,92,48,.35) 55%,rgba(28,92,48,.12));border-radius:0 calc(var(--rad) - 4px) calc(var(--rad) - 4px) 0;clip-path:polygon(0 0,100% 0,100% 100%,0 100%,14px 50%);margin-left:-10px;padding-left:24px}
+.hd{display:flex;gap:10px;align-items:center}.hd .ic{width:28px;height:28px;font-size:14px}
+.ev2 .ttl{margin:8px 0 0}
+.k2{color:var(--mut);font-size:13px;flex:none;width:38px}
+.ai{margin-right:12px}
+.ai{width:26px;height:26px;border-radius:7px;flex:none;background:linear-gradient(135deg,#fff,#d9d4ff)}
+.act{color:#60a5fa}
+.r .chev{width:12px;text-align:center}
+.nd{display:block;font-size:14px;color:var(--tx);position:relative;padding-left:15px;margin-top:2px}
+.nd::before{content:"";position:absolute;left:3px;top:-3px;width:7px;height:11px;border-left:1.5px solid var(--mut);border-bottom:1.5px solid var(--mut);border-bottom-left-radius:3px}
+.r .st,.r .rb{width:22px;flex:none;display:grid;place-items:center}
+.st svg{width:18px;height:18px}.st.x{color:var(--err)}.st.q{color:var(--mut)}
+.r .rb{margin-right:-2px}
+.r{padding:10px 11px}
+.r .chev,.r .go,.r .rb{display:flex;align-items:center;justify-content:center;height:20px}
+.r .chev i,.r .go i,.r .rb i{display:flex}.r .chev svg,.r .go svg,.r .rb svg{display:block}
+.r.sp{padding:0;align-items:stretch;gap:0}
+.main{flex:1;display:flex;gap:10px;align-items:center;padding:10px 11px;min-width:0}
+.main.bad{background:linear-gradient(90deg,rgb(110,38,40),rgba(110,38,40,.45) 45%,rgba(110,38,40,0) 85%)}
+.main.ok{background:linear-gradient(90deg,rgb(28,92,48),rgba(28,92,48,.45) 45%,rgba(28,92,48,0) 85%)}
+:root{--err-rgb:240,82,82;--ok-rgb:63,185,80;--acc-rgb:59,130,246;--rad:14px}
+body.th-original{--bg:#0B0F1A;--card:#131929;--row:#1A2035;--line:#252D45;--tx:#D4DEFF;--mut:#7B8EC8;--acc:#4F8EFF;--acc-rgb:79,142,255;--warn:#F0A040;--err:#F05060;--err-rgb:240,80,96;--ok:#00C896;--ok-rgb:0,200,150;--rad:14px}
+body.th-github{--bg:#0D1117;--card:#161B22;--row:#1C2128;--line:#30363D;--tx:#E6EDF3;--mut:#8B949E;--acc:#2F81F7;--acc-rgb:47,129,247;--warn:#D29922;--err:#F85149;--err-rgb:248,81,73;--ok:#3FB950;--ok-rgb:63,185,80;--rad:8px}
+body[class^="th-"] .phone{border-radius:var(--rad)}
+body[class^="th-"] .box{border-radius:calc(var(--rad) - 4px)}
+body[class^="th-"] .b,body[class^="th-"] .rb,body[class^="th-"] .r .chev,body[class^="th-"] .r .go,body[class^="th-"] .act{color:var(--acc)}
+body[class^="th-"] .b{background:rgba(var(--acc-rgb),.15);border-radius:calc(var(--rad) - 6px)}
+body[class^="th-"] .tag.w{background:rgba(210,153,34,.15);color:var(--warn)}
+body[class^="th-"] .ev2.warn{border-left-color:var(--warn)}
+body[class^="th-"] .menu{background:var(--row);border-radius:var(--rad)}
+body[class^="th-"] .menu .mi.lk{color:var(--acc)}
+.r.sp .sep{margin:0}.r.sp .go{height:auto;width:44px}
+.r .v{line-height:20px}.r .v small{line-height:17px}
+.rb i,.go i,.chev i{display:inline-flex}.rb svg,.go svg,.chev svg{width:18px;height:18px;vertical-align:middle}
+.rb{color:#60a5fa}.r .chev,.r .go{color:#60a5fa;width:22px;flex:none;text-align:center}
+.pick{background:#11161d;border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:14px;font-size:13px}
+.pick .pr{display:flex;align-items:center;gap:6px;padding:3px 0}.pick .pr b{width:46px;color:var(--mut);font-weight:600}
+.pick button{background:var(--row);border:1px solid var(--line);color:#c9d1d9;border-radius:7px;width:32px;height:30px;cursor:pointer;display:grid;place-items:center;padding:0}
+.pick button.on{border-color:var(--acc);background:var(--accbg);color:#60a5fa}.pick svg{width:18px;height:18px}
+.rb{color:#60a5fa;font-size:18px;width:26px;text-align:center;flex:none}
+.sep{width:1px;align-self:stretch;background:var(--line);margin:-9px 0}
+.go{color:var(--mut);width:22px;text-align:center;flex:none;font-size:16px}
+.sec{color:var(--mut);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;padding:8px 11px 4px;background:var(--card)}
+.x{color:var(--err);font-weight:700;width:16px;text-align:center}.q{color:var(--mut);width:16px;text-align:center}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.b{background:var(--accbg);color:#60a5fa;border-radius:8px;padding:6px 12px;font-size:14px}
+.b.p{background:var(--acc);color:#fff}
+.cause{font-size:13.5px;margin-top:6px;color:var(--mut)}.cause b{color:var(--tx)}
+.chain{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;color:#c9d1d9}
+.crit{background:#11161d;border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:13.5px;color:#c9d1d9;margin-top:10px}
+.crit ul{margin:4px 0 0;padding-left:18px}.crit li{margin:2px 0}
+.lbl{font-size:12px;font-weight:700;color:var(--acc);margin:0 0 6px}
+.bad-lbl{color:var(--err)}
+code{background:#1f2630;padding:0 4px;border-radius:4px;font-size:12.5px}
+.raw{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:#c9d1d9;background:#11161d;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:8px 0;white-space:pre-wrap;word-break:break-all}
+.newf{color:var(--warn);font-weight:600}
+.swr{display:flex;align-items:center;gap:8px;margin:8px 0}.swr .k2{width:46px}.swr .sw{flex:1;margin:0}
+.swb{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 8px;align-items:center;background:var(--row);border-radius:10px;padding:0 0 0 8px;overflow:hidden;margin:10px 0 8px}
+body[class^="th-"] .swb{border-radius:calc(var(--rad) - 4px)}
+.swb .k2{width:auto;line-height:18px}.swb .sw{margin:0}
+.sw.n .from,.sw.n .to{background:#262d38}
+.ln{font-size:14px;margin-top:6px}.ln small{color:var(--mut);font-size:12.5px}
+.lnh{font-size:13px;color:var(--mut);margin:10px 0 -4px}
+.ba{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start;margin:0 0 18px}
+.ba>.full{grid-column:1/-1}
+.ba>div{min-width:0}
+.ba .phone{width:auto;max-width:380px}
+.ba .none{color:var(--mut);font-size:13px;padding:10px;border:1px dashed rgba(255,255,255,.18);border-radius:8px}
+.ba img{max-width:100%}
+</style></head><body>
+<h1>DNS-события</h1>
+<div class="pick" id="pick" style="max-width:380px"></div>
+
+<div class="ba">
+<div>
+<div class="lbl bad-lbl">БЫЛО — dns/switched</div>
+<div class="phone">
+ <div class="ev"><div class="ic">▤</div><div class="body"><div class="meta">23:30</div><div class="ttl">DNS (vpn): dns1-dot1-v → dns1-doh1-v</div><div class="sub">dns1-dot1-v does not answer</div></div></div>
+ <div class="ev"><div class="ic">▤</div><div class="body"><div class="meta">23:30</div><div class="ttl">DNS (vpn): dns1-doh1-v → cloudflare-dot1-v</div><div class="sub">dns1-doh1-v does not answer</div></div></div>
+ <div class="ev"><div class="ic">▤</div><div class="body"><div class="meta">23:30</div><div class="ttl">DNS (vpn): cloudflare-dot1-v → dns1-dot1-v</div><div class="sub">cloudflare-dot1-v does not answer</div></div></div>
+ <div class="ev"><div class="ic">▤</div><div class="body"><div class="meta">23:30</div><div class="ttl">DNS (direct): dns1-dot1 → google-dot1</div><div class="sub">dns1-dot1 does not answer</div></div></div>
+ <div class="ev"><div class="ic">▤</div><div class="body"><div class="meta">23:30</div><div class="ttl">DNS (direct): google-dot1 → cloudflare-dot1</div><div class="sub">google-dot1 does not answer</div></div></div>
+ <div class="ev"><div class="ic">▤</div><div class="body"><div class="meta">23:30</div><div class="ttl">DNS (direct): cloudflare-dot1 → dns1-doh1</div><div class="sub">cloudflare-dot1 does not answer</div></div></div>
+</div>
+<div class="lbl bad-lbl" style="margin-top:14px">БЫЛО — dns/failed</div>
+<div class="phone">
+ <div class="ev warn"><div class="ic">▤</div><div class="body">
+  <div class="meta">02:58 <span class="tag w">WARN</span></div>
+  <div class="ttl">DNS server Cloudflare does not answer</div>
+  <div class="btns"><span class="b">Check now</span><span class="b">Open</span></div>
+  <div class="box" style="font-size:13px">
+   <div class="r"><span class="k">Server</span><span class="v">cloudflare</span></div>
+   <div class="r"><span class="k">Path</span><span class="v">proxy</span></div>
+   <div class="r"><span class="k">Since</span><span class="v">Oct 24 02:57:18</span></div>
+   <div class="r"><span class="k">Side</span><span class="v">vpn</span></div>
+  </div>
+ </div></div>
+</div>
+</div>
+<div>
+<div class="lbl">DNS switched</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">▤</div><div class="meta">23:12 <span class="tag w">WARN</span></div></div>
+  <div class="ttl">DNS switched</div>
+  <div class="swb"><span class="k2">VPN</span><div class="sw"><div class="c from"><span class="v">AdGuard<small>DoT, DoH · no answer for 30 s</small></span></div><div class="c to"><span class="v">Cloudflare<small>DoT · 41 ms</small></span></div></div></div>
+  <div class="box">
+   <div class="r"><span class="k2">Route</span><span class="v">remna · REALITY<span class="nd">RU-SPB ➜ Нидерланды</span></span><span class="chev"><i data-k="go"></i></span></div>
+  </div>
+  <div class="cause">Cause: <b>AdGuard itself</b> — Cloudflare answers through the same route</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">DNS settings</span></div>
+ </div>
+</div>
+<div class="lbl" style="margin-top:14px">DNS switched — Direct</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">▤</div><div class="meta">23:12 <span class="tag w">WARN</span></div></div>
+  <div class="ttl">DNS switched</div>
+  <div class="swb"><span class="k2">Direct</span><div class="sw"><div class="c from"><span class="v">AdGuard<small>DoT, DoH · no answer for 30 s</small></span></div><div class="c to"><span class="v">Google<small>DoH · 23 ms</small></span></div></div></div>
+  <div class="cause">Cause: <b>AdGuard itself</b> — Google answers on the same route</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">DNS settings</span></div>
+ </div>
+</div>
+<div class="lbl" style="margin-top:14px">DNS switched — оба маршрута, одинаково</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">▤</div><div class="meta">23:12 <span class="tag w">WARN</span></div></div>
+  <div class="ttl">DNS switched</div>
+  <div class="swb"><span class="k2">VPN<br>Direct</span><div class="sw"><div class="c from"><span class="v">AdGuard<small>DoT, DoH · no answer for 30 s</small></span></div><div class="c to"><span class="v">Cloudflare<small>DoT · 41 ms</small></span></div></div></div>
+  <div class="box">
+   <div class="r"><span class="k2">Route</span><span class="v">remna · REALITY<span class="nd">RU-SPB ➜ Нидерланды</span></span><span class="chev"><i data-k="go"></i></span></div>
+  </div>
+  <div class="cause">Cause: <b>AdGuard itself</b> — Cloudflare answers on both routes</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">DNS settings</span></div>
+ </div>
+</div>
+<div class="lbl" style="margin-top:14px">DNS switched — оба маршрута, по-разному</div>
+<div class="phone">
+ <div class="ev2 warn">
+  <div class="hd"><div class="ic">▤</div><div class="meta">23:12 <span class="tag w">WARN</span></div></div>
+  <div class="ttl">DNS switched</div>
+  <div class="swb">
+   <span class="k2">VPN</span><div class="sw"><div class="c from"><span class="v">AdGuard<small>DoT, DoH · no answer</small></span></div><div class="c to"><span class="v">Cloudflare<small>DoT · 41 ms</small></span></div></div>
+   <span class="k2">Direct</span><div class="sw"><div class="c from"><span class="v">AdGuard<small>DoT · no answer</small></span></div><div class="c to"><span class="v">Google<small>DoH · 23 ms</small></span></div></div>
+  </div>
+  <div class="box">
+   <div class="r"><span class="k2">Route</span><span class="v">remna · REALITY<span class="nd">RU-SPB ➜ Нидерланды</span></span><span class="chev"><i data-k="go"></i></span></div>
+  </div>
+  <div class="cause">Cause: <b>AdGuard itself</b> — other servers answer on both routes</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">DNS settings</span></div>
+ </div>
+</div>
+<div class="lbl" style="margin-top:14px">Смена транспорта (выключено по умолчанию)</div>
+<div class="phone">
+ <div class="ev2 info">
+  <div class="hd"><div class="ic">▤</div><div class="meta">23:12 <span class="tag i">INFO</span></div></div>
+  <div class="ttl">AdGuard changed transport</div>
+  <div class="swb"><span class="k2">VPN</span><div class="sw"><div class="c from"><span class="v">DoT<small>no answer for 30 s</small></span></div><div class="c to"><span class="v">DoH<small>38 ms</small></span></div></div></div>
+  <div class="cause">Cause: <b>DoT does not answer on this route</b> — DoH of the same server does</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">DNS settings</span></div>
+ </div>
+</div>
+</div>
+</div>
+
+<div class="ba">
+<div>
+<div class="lbl bad-lbl">БЫЛО — dns/failedOnNode</div>
+<div class="phone">
+ <div class="ev warn"><div class="ic">▤</div><div class="body">
+  <div class="meta">02:54 <span class="tag w">WARN</span></div>
+  <div class="ttl">DNS server Cloudflare does not answer through Frankfurt 1 — works through the spare node Amsterdam 2</div>
+  <div class="btns"><span class="b">Check now</span><span class="b">Open</span></div>
+  <div class="box" style="font-size:13px">
+   <div class="r"><span class="k">Server</span><span class="v">cloudflare</span></div>
+   <div class="r"><span class="k">Path</span><span class="v">proxy</span></div>
+   <div class="r"><span class="k">Side</span><span class="v">vpn</span></div>
+   <div class="r"><span class="k">Node</span><span class="v">Frankfurt 1</span></div>
+   <div class="r"><span class="k">Opens via</span><span class="v">Amsterdam 2</span></div>
+  </div>
+ </div></div>
+</div>
+</div>
+<div>
+<div class="lbl">Переключаться некуда</div>
+<div class="phone">
+ <div class="ev2 err">
+  <div class="hd"><div class="ic">▤</div><div class="meta">02:54 <span class="tag e">ERROR</span></div></div>
+  <div class="ttl">DNS does not answer</div>
+  <div class="box">
+   <div class="r sp"><div class="main bad"><span class="k2">VPN</span><span class="v">Cloudflare · DoT<small>no answer · no spare DNS on this side</small></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
+   <div class="sec">Checked through</div>
+   <div class="r sp"><div class="main bad"><span class="rb"><i data-k="retry"></i></span><span class="v">remna · REALITY<span class="nd">Frankfurt 1</span><small>no answer</small></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
+   <div class="r sp"><div class="main ok"><span class="rb"><i data-k="retry"></i></span><span class="v">remna · REALITY<span class="nd">Amsterdam 2</span><small>answers — spare node</small></span></div><span class="sep"></span><span class="go"><i data-k="go"></i></span></div>
+  </div>
+  <div class="cause">Cause: <b>node Frankfurt 1</b> — Cloudflare answers through another node</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">DNS settings</span></div>
+ </div>
+</div>
+<div class="lbl" style="margin-top:14px">Все серверы молчат</div>
+<div class="phone">
+ <div class="ev2 err">
+  <div class="hd"><div class="ic">▤</div><div class="meta">23:30 <span class="tag e">ERROR</span></div></div>
+  <div class="ttl">DNS does not answer</div>
+  <div class="box">
+   <div class="sec">Through VPN</div>
+   <div class="r sp"><div class="main bad"><span class="v">AdGuard · DoT, DoH<small>no answer · stays selected</small></span></div></div>
+   <div class="r sp"><div class="main bad"><span class="v">Cloudflare · DoT<small>no answer</small></span></div></div>
+   <div class="sec">Direct</div>
+   <div class="r sp"><div class="main bad"><span class="v">AdGuard · Google · Cloudflare<small>no answer · AdGuard stays selected</small></span></div></div>
+  </div>
+  <div class="cause">Cause: <b>Wi‑Fi changed</b> (23:30) — servers are not blamed</div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">Network event</span><span class="b">DNS settings</span></div>
+ </div>
+ <div class="ev2 okb">
+  <div class="hd"><div class="ic">▤</div><div class="meta">23:31 <span class="tag o">OK</span></div></div>
+  <div class="ttl">DNS answers again — after 52 s</div>
+  <div class="box">
+   <div class="r sp"><div class="main ok"><span class="k2">VPN</span><span class="v">AdGuard · DoT</span></div></div>
+   <div class="r sp"><div class="main ok"><span class="k2">Direct</span><span class="v">AdGuard · DoT</span></div></div>
+  </div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">DNS settings</span></div>
+ </div>
+</div>
+</div>
+</div>
+
+<div class="ba">
+<div>
+<div class="lbl">Смена сети — обе стороны одинаково</div>
+<div class="phone">
+ <div class="ev2 info">
+  <div class="hd"><div class="ic">⇄</div><div class="meta">23:12 <span class="tag i">INFO</span></div></div>
+  <div class="ttl">Network changed</div>
+  <div class="sw n"><div class="c from"><span class="v">Wi‑Fi · Rostelecom</span></div><div class="c to"><span class="v">Mobile · MTS</span></div></div>
+  <div class="ln">VPN reconnected <small>· 1.1 s</small></div>
+  <div class="lnh">DNS switched</div>
+  <div class="swb"><span class="k2">VPN<br>Direct</span><div class="sw"><div class="c from"><span class="v">AdGuard<small>DoT, DoH · no answer</small></span></div><div class="c to"><span class="v">Cloudflare<small>DoT · 41 ms</small></span></div></div></div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">DNS settings</span></div>
+ </div>
+</div>
+</div>
+<div>
+<div class="lbl">Смена сети — стороны по-разному</div>
+<div class="phone">
+ <div class="ev2 info">
+  <div class="hd"><div class="ic">⇄</div><div class="meta">23:12 <span class="tag i">INFO</span></div></div>
+  <div class="ttl">Network changed</div>
+  <div class="sw n"><div class="c from"><span class="v">Wi‑Fi · Rostelecom</span></div><div class="c to"><span class="v">Mobile · MTS</span></div></div>
+  <div class="ln">VPN reconnected <small>· 1.1 s</small></div>
+  <div class="lnh">DNS switched</div>
+  <div class="swb"><span class="k2">VPN</span><div class="sw"><div class="c from"><span class="v">AdGuard<small>DoT, DoH</small></span></div><div class="c to"><span class="v">Cloudflare<small>DoT</small></span></div></div></div>
+  <div class="lnh">AdGuard changed transport</div>
+  <div class="swb"><span class="k2">Direct</span><div class="sw"><div class="c from"><span class="v">DoT</span></div><div class="c to"><span class="v">DoH</span></div></div></div>
+  <div class="btns"><span class="b">Details ▾</span><span class="b">DNS settings</span></div>
+ </div>
+</div>
+</div>
+</div>
+
+<script>
+const I={
+'refresh-cw':'<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+'rotate-cw':'<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
+'refresh-ccw':'<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/>',
+'redo-2':'<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/>',
+'repeat-2':'<path d="m2 9 3-3 3 3"/><path d="M13 18H7a2 2 0 0 1-2-2V6"/><path d="m22 15-3 3-3-3"/><path d="M11 6h6a2 2 0 0 1 2 2v10"/>',
+'x':'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+'circle-help':'<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+'plus':'<path d="M5 12h14"/><path d="M12 5v14"/>',
+'circle-plus':'<circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/>',
+'square-plus':'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M8 12h8"/><path d="M12 8v8"/>',
+'list-plus':'<path d="M16 5H3"/><path d="M11 12H3"/><path d="M16 19H3"/><path d="M18 9v6"/><path d="M21 12h-6"/>',
+'chevron-right':'<path d="m9 18 6-6-6-6"/>',
+'chevrons-right':'<path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/>',
+'arrow-right':'<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+'square-arrow-out-up-right':'<path d="M21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"/><path d="m21 3-9 9"/><path d="M15 3h6v6"/>',
+'locate-fixed':'<line x1="2" x2="5" y1="12" y2="12"/><line x1="19" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="5"/><line x1="12" x2="12" y1="19" y2="22"/><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/>',
+'crosshair':'<circle cx="12" cy="12" r="10"/><line x1="22" x2="18" y1="12" y2="12"/><line x1="6" x2="2" y1="12" y2="12"/><line x1="12" x2="12" y1="6" y2="2"/><line x1="12" x2="12" y1="22" y2="18"/>',
+'map-pin':'<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>'};
+const svg=n=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${I[n]}</svg>`;
+const G={retry:['refresh-cw','rotate-cw','refresh-ccw','redo-2','repeat-2'],add:['plus','circle-plus','square-plus','list-plus'],go:['chevron-right','chevrons-right','arrow-right','square-arrow-out-up-right','locate-fixed','crosshair','map-pin']};
+const L={retry:'Retry',add:'Add',go:'Go'};const cur={x:'x',q:'circle-help',retry:'repeat-2',add:'square-plus',go:'square-arrow-out-up-right'};
+const pick=document.getElementById('pick');
+function draw(){document.querySelectorAll('i[data-k]').forEach(e=>e.innerHTML=svg(cur[e.dataset.k]));
+ pick.innerHTML=`<div class="pr"><b>Theme</b>${['original','github'].map(t=>`<button style="width:auto;padding:0 10px" data-th="${t}" class="${document.body.className=='th-'+t?'on':''}">${t}</button>`).join('')}</div>`+'<div style="color:var(--mut);margin:6px 0 4px">Иконки Lucide — нажми, чтобы примерить:</div>'+Object.keys(G).map(k=>`<div class="pr"><b>${L[k]}</b>${G[k].map(n=>`<button title="${n}" data-k="${k}" data-n="${n}" class="${cur[k]==n?'on':''}">${svg(n)}</button>`).join('')}</div>`).join('');}
+pick.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.th)document.body.className='th-'+b.dataset.th;else cur[b.dataset.k]=b.dataset.n;draw();});
+document.body.className='th-github';
+draw();
+</script>
+</body></html>

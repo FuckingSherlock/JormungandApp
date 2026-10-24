@@ -351,7 +351,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       if (ruleId == null && host == null) return; // just the dialog of the app
       _afterTab(() => showRuleForm(_ctx, id: ruleId, host: host, appRuleOf: app, fallbackVia: via));
     },
-    openRoute: ({edit = false}) => showRouteSheet(_ctx, edit: edit),
+    openRoute: ({edit = false, node}) => showRouteSheet(_ctx, edit: edit, node: node),
     openLogsEvent: (id) {
       _setTab(AppTab.logs);
       _logs?.showEvent(id);

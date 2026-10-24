@@ -195,7 +195,8 @@ class SystemNotifier {
       ],
       'conn/failing' => [if (site.isNotEmpty && !withApp) ('rule', l.createRule)],
       'auto/unstable' => [('open', l.open)],
-      'dns/failed' => [('open', l.open)],
+      // `open` of a DNS event opens Settings → DNS (eventOpenTarget: dns → 'dns'); dns/up replaces it in place
+      'dns/down' => [('open', l.dnsSettings)],
       'sub/updated' || 'sub/removed' || 'sub/back' => [('open', l.open)],
       'sub/failed' => [if (isSub) ('retrySub', l.retry)],
       'node/addressMissing' => [if (isSub) ('retrySub', l.updateSubscription)],

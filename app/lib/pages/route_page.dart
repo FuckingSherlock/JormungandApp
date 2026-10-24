@@ -1,3 +1,5 @@
+import 'dart:math' show cos, pi;
+
 import 'package:flutter/material.dart';
 import 'package:jormungand_core/jormungand_core.dart'
     show Catalog, CatalogDrafts, CatalogNode, NodeRef, OffReason;
@@ -9,6 +11,7 @@ import '../theme/app_colors.g.dart';
 import '../widgets/app_sheet.dart';
 import '../widgets/catalog_card.dart' show GripHandle;
 import '../widgets/entry_editors.dart';
+import '../widgets/follow_list.dart' show showRow;
 import '../widgets/form_parts.dart';
 import '../widgets/latency_text.dart';
 import '../widgets/node_row.dart';
@@ -30,15 +33,19 @@ Future<void> showRouteSheet(
   BuildContext context, {
   bool edit = false,
   String? mode,
+  String? node,
 }) {
   return showAppSheet<void>(
     context,
-    builder: (_) => RouteSheet(edit: edit, mode: mode),
+    builder: (_) => RouteSheet(edit: edit, mode: mode, node: node),
   );
 }
 
 class RouteSheet extends StatefulWidget {
-  const RouteSheet({super.key, this.edit = false, this.mode});
+  const RouteSheet({super.key, this.edit = false, this.mode, this.node});
+
+  /// A node key (`sid::nid`): its entry is unfolded, the list scrolls to it and it blinks twice.
+  final String? node;
 
   /// Opens in edit mode (the "Nothing in Auto" alert).
   final bool edit;
@@ -61,6 +68,29 @@ class _RouteSheetState extends State<RouteSheet> {
 
   /// Where the list slides in from after the mode switch (+1 = from the right).
   int _swap = 1;
+
+  /// The entry that holds [RouteSheet.node] and the key of its row (scrolled to, blinking).
+  String? _focusEntry;
+  final _focusKey = GlobalKey();
+  bool _focusStarted = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final node = widget.node;
+    if (node == null || _focusStarted) return;
+    _focusStarted = true;
+    final catalog = CoreHostScope.of(context).catalog;
+    for (final id in catalog.visibleOrder()) {
+      if (catalog.chainsData[id] != null) continue;
+      if (catalog.unitRefs(id).any((r) => r.key == node)) {
+        _focusEntry = id;
+        _open.add(id);
+        WidgetsBinding.instance.addPostFrameCallback((_) => showRow(_focusKey));
+        return;
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -284,6 +314,7 @@ class _RouteSheetState extends State<RouteSheet> {
         index: i,
         edit: _edit,
         open: _open.contains(visible[i]),
+        focus: visible[i] == _focusEntry && widget.node != null ? (node: widget.node!, key: _focusKey) : null,
         onToggleOpen: () => setState(() {
           if (!_open.remove(visible[i])) _open.add(visible[i]);
         }),
@@ -756,12 +787,16 @@ class _EntryRow extends StatelessWidget {
     required this.edit,
     required this.open,
     required this.onToggleOpen,
+    this.focus,
   });
 
   final String id;
   final int index;
   final bool edit;
   final bool open;
+
+  /// The node of this entry to blink ([RouteSheet.node]).
+  final ({String node, GlobalKey key})? focus;
   final VoidCallback onToggleOpen;
 
   @override
@@ -885,7 +920,7 @@ class _EntryRow extends StatelessWidget {
               ),
             ],
           ),
-          if (open) isChain ? _ChainBody(id: id) : _Body(id: id, edit: edit),
+          if (open) isChain ? _ChainBody(id: id) : _Body(id: id, edit: edit, focus: focus),
         ],
       ),
     );
@@ -999,10 +1034,11 @@ class _Summary extends StatelessWidget {
 
 /// `.conn-body`: the unfolded servers of an entry, with Fastest / Priority in edit mode.
 class _Body extends StatelessWidget {
-  const _Body({required this.id, required this.edit});
+  const _Body({required this.id, required this.edit, this.focus});
 
   final String id;
   final bool edit;
+  final ({String node, GlobalKey key})? focus;
 
   @override
   Widget build(BuildContext context) {
@@ -1039,8 +1075,9 @@ class _Body extends StatelessWidget {
     Widget row(int i, {bool top = true}) {
       final r = refs[i];
       final pinned = pin != null && pin.key == r.key;
-      return Container(
-        key: ValueKey(r.key),
+      final f = focus != null && focus!.node == r.key ? focus : null;
+      final item = Container(
+        key: f == null ? ValueKey(r.key) : null,
         decoration: pinned
             ? BoxDecoration(
                 color: c.warn.tint(.12),
@@ -1068,6 +1105,8 @@ class _Body extends StatelessWidget {
           onPing: () => host.pingNodes([r.node]),
         ),
       );
+      // the node an event pointed at: it blinks twice when the sheet opens (its key is what the sheet scrolls to)
+      return f == null ? item : _Blink(key: f.key, child: item);
     }
 
     final Widget list;
@@ -1271,6 +1310,49 @@ class _DeadBlockState extends State<_DeadBlock> {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Tints its child with the accent twice (two blinks) once, when it appears.
+class _Blink extends StatefulWidget {
+  const _Blink({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  State<_Blink> createState() => _BlinkState();
+}
+
+class _BlinkState extends State<_Blink> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1600));
+
+  @override
+  void initState() {
+    super.initState();
+    _ctl.forward();
+  }
+
+  @override
+  void dispose() {
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return AnimatedBuilder(
+      animation: _ctl,
+      builder: (context, child) {
+        // 0 > 1 > 0 > 1 > 0 over the run: two blinks
+        final k = (1 - cos(_ctl.value * 4 * pi)) / 2;
+        return DecoratedBox(
+          decoration: BoxDecoration(color: _ctl.isCompleted ? null : c.accent.tint(.3 * k)),
+          child: child,
+        );
+      },
+      child: widget.child,
     );
   }
 }

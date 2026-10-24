@@ -76,39 +76,174 @@ String dnsRootKey(String id) => 'dns|$id';
 /// The sides, in the order the servers are listed.
 const dnsSideNames = ['direct', 'vpn'];
 
-/// The DNS server a side answers with changed. [from] / [to] are the candidates' ids (the Sentinel's node ids),
-/// [fromProvider] / [toProvider] their providers'; [reason]: `failover` (the one in use is down, also the protocol the
-/// race picks after the winner failed), `back` (a higher one answers again), `node` (another exit node: its stored
-/// verdicts apply) or `off` (Switch automatically was turned off: every flag is on, the top candidate answers). The winner
-/// of a protocol race at the start, on another network or on another exit node is an ordinary choice, not a switch: no
-/// [DnsSwitch] (the raw log has the race's line with every transport's result).
-class DnsSwitch {
-  const DnsSwitch({
-    required this.side,
-    required this.from,
-    required this.to,
-    required this.fromProvider,
-    required this.toProvider,
-    required this.reason,
-    required this.at,
-  });
+/// A server of a side in the records below: the provider's id, its name (`DnsServerCfg.name`, the id when empty) and the
+/// transports ([kinds]: doh / dot / doq / udp / system) it has on that side.
+class DnsEnd {
+  const DnsEnd({required this.provider, required this.name, required this.kinds});
 
-  final String side, from, to, fromProvider, toProvider, reason;
+  final String provider, name;
+  final List<String> kinds;
+
+  Map<String, dynamic> toJson() => {'provider': provider, 'name': name, 'kinds': kinds};
+}
+
+/// Where a side's DNS moved from: the provider, the transports of it that were silent ([silent], empty when it was
+/// not a failure) and since when (ms since epoch; the first miss of the silent ones, else the moment of the move).
+class DnsEndFrom {
+  const DnsEndFrom({required this.provider, required this.name, required this.silent, required this.since});
+
+  final String provider, name;
+  final List<String> silent;
+  final int since;
+
+  Map<String, dynamic> toJson() => {'provider': provider, 'name': name, 'silent': silent, 'since': since};
+}
+
+/// Where a side's DNS moved to: the provider, the transport that answers and the ms of its last answer (-1 = none).
+class DnsEndTo {
+  const DnsEndTo({required this.provider, required this.name, required this.kind, required this.ms});
+
+  final String provider, name, kind;
+  final int ms;
+
+  Map<String, dynamic> toJson() => {'provider': provider, 'name': name, 'kind': kind, 'ms': ms};
+}
+
+/// One side of a [DnsSwitch].
+class DnsSwitchSide {
+  const DnsSwitchSide({required this.side, required this.from, required this.to});
+
+  final String side;
+  final DnsEndFrom from;
+  final DnsEndTo to;
+
+  Map<String, dynamic> toJson() => {'side': side, 'from': from.toJson(), 'to': to.toJson()};
+}
+
+/// The DNS server a side answers with changed to another provider, one record per cause: a cause that moved both sides
+/// is one record with both ([sides]); [same] = both sides moved between the same providers. [reason]: `failover` (the one
+/// in use is down), `back` (a higher one answers again), `node` (another exit node: its stored verdicts apply), `off`
+/// (Switch automatically was turned off: every flag is on, the top candidate answers) or `race` (the protocol race after
+/// another network / exit node picked a provider other than the one in use). The winner of the race at the start is an
+/// ordinary choice: no record (the raw log has the race's line with every transport's result). A side whose servers all
+/// miss moves nowhere: that is a [DnsDown].
+class DnsSwitch {
+  const DnsSwitch({required this.sides, required this.same, required this.reason, required this.at});
+
+  final List<DnsSwitchSide> sides;
+  final bool same;
+  final String reason;
   final int at;
 
   Map<String, dynamic> toJson() => {
-        'side': side,
-        'from': from,
-        'to': to,
-        'fromProvider': fromProvider,
-        'toProvider': toProvider,
         'reason': reason,
+        'sides': [for (final s in sides) s.toJson()],
+        'same': same,
         'at': at,
       };
 }
 
-/// The (category, type) of a DNS verdict's event, written so that the catalog test (event_catalog_test.dart) can read it.
-(String, String) _dnsKind(String cat, String type) => (cat, type);
+/// One side of a [DnsTransportChange]: the provider stays, its answering transport changes from the silent [from] to [to]
+/// (ms of its last answer, -1 = none).
+class DnsTransportChangeSide {
+  const DnsTransportChangeSide({
+    required this.side,
+    required this.provider,
+    required this.name,
+    required this.from,
+    required this.to,
+    required this.ms,
+  });
+
+  final String side, provider, name, to;
+  final List<String> from;
+  final int ms;
+
+  Map<String, dynamic> toJson() => {'side': side, 'provider': provider, 'name': name, 'from': from, 'to': to, 'ms': ms};
+}
+
+/// The DNS server of a side stays the same provider but answers over another transport (the one in use went silent, or
+/// the race after another network / exit node picked another). Not a [DnsSwitch]. [same] = both sides did the same.
+class DnsTransportChange {
+  const DnsTransportChange({required this.sides, required this.same, required this.at});
+
+  final List<DnsTransportChangeSide> sides;
+  final bool same;
+  final int at;
+
+  Map<String, dynamic> toJson() => {'sides': [for (final s in sides) s.toJson()], 'same': same, 'at': at};
+}
+
+/// One node the VPN side's DNS was asked through (the `dns.node` check): the node's key (`<subscription>::<node>`), its
+/// subscription and protocol (as [DnsFailover.describeNode] tells), and whether the server answered through it.
+class DnsNodeRow {
+  const DnsNodeRow({required this.key, required this.sub, required this.proto, required this.ok});
+
+  final String key, sub, proto;
+  final bool ok;
+
+  Map<String, dynamic> toJson() => {'key': key, 'sub': sub, 'proto': proto, 'ok': ok};
+}
+
+/// One side of a [DnsDown]: every provider on it with its transports ([servers]) and the provider kept selected.
+class DnsDownSide {
+  const DnsDownSide({required this.side, required this.servers, required this.selected});
+
+  final String side, selected;
+  final List<DnsEnd> servers;
+
+  Map<String, dynamic> toJson() => {'side': side, 'servers': [for (final s in servers) s.toJson()], 'selected': selected};
+}
+
+/// One side of a [DnsUp]: who answers it again.
+class DnsUpSide {
+  const DnsUpSide({required this.side, required this.provider, required this.name, required this.kind});
+
+  final String side, provider, name, kind;
+
+  Map<String, dynamic> toJson() => {'side': side, 'provider': provider, 'name': name, 'kind': kind};
+}
+
+/// The pair of outage records: [DnsDown] when every server of a side is down (nowhere to switch: the selection stays),
+/// [DnsUp] when any of them answers again.
+sealed class DnsOutage {
+  const DnsOutage({required this.at});
+
+  final int at;
+
+  Map<String, dynamic> toJson();
+}
+
+/// Every candidate of the [sides] is down. [noSpare]: no side has another provider to switch to (a spare that is off is
+/// not in the side; a spare that is down too is in [DnsDownSide.servers]). [nodes]: the exit node and the spare node the
+/// VPN side's server was asked through (the `dns.node` check, which runs only when the VPN side has nowhere to switch);
+/// null = no spare node, the transport cannot be asked that way, or no check.
+class DnsDown extends DnsOutage {
+  const DnsDown({required this.sides, required this.noSpare, this.nodes, required super.at});
+
+  final List<DnsDownSide> sides;
+  final bool noSpare;
+  final List<DnsNodeRow>? nodes;
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'sides': [for (final s in sides) s.toJson()],
+        'noSpare': noSpare,
+        if (nodes != null) 'nodes': [for (final n in nodes!) n.toJson()],
+        'at': at,
+      };
+}
+
+/// The [sides] that were down answer again, [afterMs] after the first of them went down.
+class DnsUp extends DnsOutage {
+  const DnsUp({required this.afterMs, required this.sides, required super.at});
+
+  final int afterMs;
+  final List<DnsUpSide> sides;
+
+  @override
+  Map<String, dynamic> toJson() => {'afterMs': afterMs, 'sides': [for (final s in sides) s.toJson()], 'at': at};
+}
 
 /// What the VPN side's check needs to ask the same server through another exit node (docs/failures.md → DNS на ноде).
 class DnsNodes {
@@ -129,7 +264,7 @@ class DnsNodes {
   final Future<int?> Function(DnsCandidate c, String tag, String name, int timeoutMs) ask;
 }
 
-/// What the check of one VPN-side miss found out (shared by its checks and the event it writes).
+/// What the check of one VPN-side miss found out (shared by its checks and the verdict's log line).
 class _Finding {
   /// `node`: it answered through another node (dead on this one only); `server`: silent through the other one too, or no
   /// other node could be asked.
@@ -194,6 +329,10 @@ class _Node {
   /// The provider's transports on its side this one belongs to (a member of a side only).
   _Group? group;
 
+  /// What the last `dns.node` check of its miss found: the exit node (red) and the spare node (green when the server
+  /// answered through it). Null = the check did not run or found nothing to tell. Goes into [DnsDown.nodes].
+  List<DnsNodeRow>? nodeRows;
+
   String get id => entry.id;
   String get side => c?.side ?? 'direct';
   String get provider => c?.provider ?? 'system';
@@ -208,8 +347,30 @@ class _Side {
   final String name;
   final List<_Node> members;
 
-  /// The member the config answers with now, as the flags say.
+  /// The member the config answers with now, as the flags say; it is kept while no flag of the side is on (nothing to
+  /// switch to: the selection does not go round the candidates).
   _Node? effective;
+
+  /// Every candidate of the side is down; null = the side is not out.
+  _Outage? outage;
+}
+
+/// A side whose candidates are all down: since when (ms since epoch) and whether [DnsDown] told it (a verdict stored from
+/// before the start is not news: it gets no [DnsDown], so no [DnsUp] either).
+class _Outage {
+  _Outage(this.since, {required this.announced});
+
+  final int since;
+  final bool announced;
+}
+
+/// A side's move to another candidate in one pass of the decision, before it is told as a record.
+class _Move {
+  _Move(this.side, this.from, this.to, this.reason);
+
+  final String side;
+  final _Node from, to;
+  final String reason;
 }
 
 /// The transports of one provider on one side, in the provider's own order: they take part in the protocol race
@@ -262,6 +423,7 @@ class DnsFailover {
     this.auto = true,
     this.pool,
     int Function()? clock,
+    Timer Function(Duration, void Function())? timer,
     this.note,
     this.flagWait = const Duration(seconds: 3),
     this.flagPoll = const Duration(milliseconds: 60),
@@ -271,7 +433,10 @@ class DnsFailover {
     this.node,
     this.nodes,
     this.vpnRecheck = dnsVpnRecheck,
+    this.nameOf,
+    this.describeNode,
   })  : _clock = clock ?? _wallClock,
+        _makeTimer = timer ?? Timer.new,
         book = book ?? DnsVerdictBook() {
     _sides = [
       for (final name in dnsSideNames)
@@ -324,8 +489,10 @@ class DnsFailover {
     }
     for (final s in _sides) {
       s.effective = _pick(s);
+      // every server of it stored as dead: a state that was there before, not news ([DnsDown] is told on a change)
+      if (s.members.isNotEmpty && s.members.every(_down)) s.outage = _Outage(_clock(), announced: false);
     }
-    _sub = sentinel.changes.listen((_) => unawaited(_react()));
+    _sub =sentinel.changes.listen((_) => unawaited(_react()));
   }
 
   /// Writes the flag of [c] (dns_flags.dart `setDnsFlag`, with the log line); false = not written. [reason]: `verdict`
@@ -360,6 +527,14 @@ class DnsFailover {
   /// How long a result of a round counts for the Sentinel's checks of the same server ([dnsFreshResult]).
   final Duration fresh;
 
+  /// The name of a provider as the user sees it (`DnsServerCfg.name`, read live: a rename applies at once); null, or empty
+  /// for a provider = its id.
+  final String Function(String provider)? nameOf;
+
+  /// The subscription and protocol of the node [key] (`<subscription>::<node>`) for [DnsDown.nodes]; null, or null for a key
+  /// = the subscription is the part of the key before `::`, the protocol is empty.
+  final ({String sub, String proto})? Function(String key)? describeNode;
+
   /// How long a server must keep missing before the Sentinel may call it down (windows.dart `dnsDown`).
   final Duration window;
 
@@ -376,10 +551,13 @@ class DnsFailover {
   /// How long a candidate whose root is open waits before it is asked again (the last step repeats).
   final List<Duration> recheckLadder;
   final int Function() _clock;
+  final Timer Function(Duration, void Function()) _makeTimer;
   late final List<_Side> _sides;
   late final List<_Group> _groups;
   late final List<_Node> _watch;
   final _switches = StreamController<DnsSwitch>.broadcast();
+  final _transports = StreamController<DnsTransportChange>.broadcast();
+  final _outages = StreamController<DnsOutage>.broadcast();
   StreamSubscription<Map<String, dynamic>>? _sub;
   Timer? _timer, _recheckTimer;
   bool _busy = false, _busyLadder = false, _started = false, _stopped = false, _again = false, _writeFailed = false;
@@ -437,7 +615,20 @@ class DnsFailover {
   /// Every candidate's flag as the core wrote it (id → on): what a restarted sing-box is given again.
   Map<String, bool> get flags => {for (final n in _flagged) n.id: n.on};
 
+  /// A side moved to another provider (one record per cause, [DnsSwitch]).
   Stream<DnsSwitch> get switches => _switches.stream;
+
+  /// A side kept its provider and answers over another transport ([DnsTransportChange]).
+  Stream<DnsTransportChange> get transports => _transports.stream;
+
+  /// Every server of a side is down ([DnsDown]) and one of them answers again ([DnsUp]).
+  Stream<DnsOutage> get outages => _outages.stream;
+
+  /// The name of [provider] to show: [nameOf], the id when it has none.
+  String _name(String provider) {
+    final n = nameOf?.call(provider);
+    return n == null || n.isEmpty ? provider : n;
+  }
 
   void start() {
     _started = true;
@@ -453,11 +644,13 @@ class DnsFailover {
     _recheckTimer?.cancel();
     unawaited(_sub?.cancel());
     _switches.close();
+    _transports.close();
+    _outages.close();
   }
 
   void _schedule(Duration d) {
     _timer?.cancel();
-    if (_started && !_stopped) _timer = Timer(d, () => unawaited(_round(_Round.periodic)));
+    if (_started && !_stopped) _timer = _makeTimer(d, () => unawaited(_round(_Round.periodic)));
   }
 
   // ── the ladder of the dead ──
@@ -484,7 +677,7 @@ class DnsFailover {
     final next = _all.map((n) => n.recheckAt).whereType<int>().fold<int?>(null, (a, b) => a == null || b < a ? b : a);
     if (next == null) return;
     final wait = (next > _recheckNotBefore ? next : _recheckNotBefore) - now;
-    _recheckTimer = Timer(Duration(milliseconds: wait < 0 ? 0 : wait), () => unawaited(checkDue()));
+    _recheckTimer = _makeTimer(Duration(milliseconds: wait < 0 ? 0 : wait), () => unawaited(checkDue()));
   }
 
   // A parked candidate was asked: the next step of the ladder, or off it when it answered.
@@ -545,8 +738,9 @@ class DnsFailover {
       sentinel.closeRoot(dnsRootKey(n.id), reason: 'node'); // the root was about the other node
       n.w = Watched();
       n.missSince = n.missAt = n.okAt = null;
+      n.nodeRows = null;
     }
-    final members = [for (final n in vpn) if (n.member) n.c!];
+    final members =[for (final n in vpn) if (n.member) n.c!];
     final stored = dnsStartFlags({'vpn': members}, book, node: cur, others: [for (final n in vpn) if (!n.member) n.c!]);
     // the winners of the old node mean nothing on the new one: the flags go by the stored verdicts until the race
     final raced = _groups.where((g) => g.side == 'vpn' && g.multi).toList();
@@ -937,6 +1131,21 @@ class DnsFailover {
           if (!identical(o, s) && o.c != null && s.c != null && o.provider == s.provider && o.side == s.side) o,
       ];
 
+  // The VPN side has nowhere to switch from [s]: every other candidate of it (another transport of the provider, a spare
+  // provider) is silent or dead. With one that is not, the core just switches and the exit node is not looked at.
+  bool _nowhere(_Node s) => _members.every((o) => identical(o, s) || o.side != s.side || _silent(o));
+
+  // The rows of [DnsDown.nodes]: the exit node in use (the server is silent on it) and the spare node it was asked through
+  // ([answers]: it answered there).
+  List<DnsNodeRow> _nodeRows(String? exit, String spare, {required bool answers}) {
+    DnsNodeRow row(String key, bool ok) {
+      final d = describeNode?.call(key);
+      return DnsNodeRow(key: key, sub: d?.sub ?? key.split('::').first, proto: d?.proto ?? '', ok: ok);
+    }
+
+    return [if (exit != null) row(exit, false), row(spare, answers)];
+  }
+
   // What a root made of this server's miss covers and the Sentinel's subject for it.
   Map<String, dynamic> _subject(_Node s) => {'dns': s.id, 'path': s.path, if (s.vpn) 'route': topTag};
 
@@ -960,6 +1169,7 @@ class DnsFailover {
     final nodes = s.vpn ? this.nodes : null;
     final found = _Finding();
     s.pairDead = s.serverDead = false;
+    s.nodeRows = null;
     s.suspecting = true;
     unawaited(sentinel
         .suspect(Suspicion(
@@ -983,10 +1193,12 @@ class DnsFailover {
               final ms = await _ask(s, cancel);
               return CheckResult('dns.answers', ms >= 0 ? Outcome.pass : Outcome.fail, {'server': s.id});
             }, timeout: const Duration(seconds: 20), level: Level.dns, via: via, resolver: s.id),
-            // the VPN side: the exit node carries traffic (else it is not the server's doing) and the same server is asked
-            // through another node that works: it answers there = dead on this node only; silent there too = dead itself
+            // the VPN side, only when it has nowhere to switch (every other server of it is silent too; with a spare DNS the
+            // core just switches): the exit node carries traffic (else it is not the server's doing) and the same server is
+            // asked through another node that works: it answers there = dead on this node only; silent there too = dead itself
             if (nodes != null && s.c != null)
               Check.diagnostic('dns.node', (cancel) async {
+                if (!_nowhere(s)) return const CheckResult('dns.node', Outcome.inconclusive, {'reason': 'hasSpare'});
                 if (await nodes.exitAlive() == false) {
                   found.nodeSilent = true;
                   return const CheckResult('dns.node', Outcome.inconclusive, {'reason': 'nodeSilent'});
@@ -1007,10 +1219,12 @@ class DnsFailover {
                 if (ms >= 0) {
                   found.kind = 'node';
                   s.pairDead = true;
+                  s.nodeRows = _nodeRows(found.exit, spare.key, answers: true);
                   return CheckResult('dns.node', Outcome.fail, {'server': s.id, 'node': found.exit, 'via': spare.key, 'ms': ms});
                 }
                 if (unsure) return CheckResult('dns.node', Outcome.inconclusive, {'reason': 'cannotAsk', 'via': spare.key});
                 s.serverDead = true;
+                s.nodeRows = _nodeRows(found.exit, spare.key, answers: false);
                 return CheckResult('dns.node', Outcome.pass, {'server': s.id, 'node': found.exit, 'silentVia': spare.key});
               }, timeout: const Duration(seconds: 30), level: Level.dns, via: via, resolver: s.id),
             // another server of the same path answers: it is this server, not the path. The ones known dead are not
@@ -1037,40 +1251,22 @@ class DnsFailover {
                     {'path': s.path, 'answering': answering, if (dead.isNotEmpty) 'dead': dead});
               }, timeout: const Duration(seconds: 20), level: Level.dns, via: via),
           ],
-          // The event is per provider and side: a transport that is down while another transport of its provider
-          // answers is a line in the log, not an entry in the journal (the provider works). Dead on this exit node only:
-          // `dns/failedOnNode`; dead itself: `dns/failed`.
-          event: SuspicionEvent('dns', 'failed',
-              level: 'warn',
-              kindFor: (kind, e) {
-                if (kind != VerdictKind.confirmed) return null;
-                final alive = _siblings(s).where((o) => !_down(o)).toList();
-                if (alive.isNotEmpty) {
-                  _note('info', 'dns: ${s.id} (${s.provider}, ${s.side}) does not answer, its provider still does through ${alive.map((o) => o.id).join(', ')}: not an event');
-                  return null;
-                }
-                return found.kind == 'node' ? _dnsKind('dns', 'failedOnNode') : _dnsKind('dns', 'failed');
-              },
-              // dead on the exit node only, while the server itself was found dead earlier: that event is the root
-              causeFor: (cat, type, kind, d) {
-                if (type != 'failedOnNode') return null;
-                final root = sentinel.book?.recent('dns', 'failed', {'server': s.id}, const Duration(hours: 6));
-                return root == null ? null : (root['cause'] as num?)?.toInt() ?? root['id'] as int;
-              },
-              dataFor: (kind, e) => {
-                    'server': e['server'],
-                    'path': e['path'],
-                    'since': e['since'],
-                    'provider': s.provider,
-                    'side': s.side,
-                    'servers': [s.id, for (final o in _siblings(s)) o.id],
-                    if (found.kind == 'node') ...{'node': found.exit, 'via': found.via},
-                  },
-              note: (kind, e) => found.kind == 'node'
-                  ? 'DNS server ${e['server']} (via VPN) does not answer on the exit node ${found.exit}, it answers through ${found.via}'
-                  : 'DNS server ${e['server']} (${e['path'] == 'proxy' ? 'via VPN' : 'direct'}) does not answer'),
+          // No journal entry of its own: a verdict of the server is told by the side's records (a switch, or [DnsDown] when
+          // there is nowhere to switch), decided from the flags and the verdicts ([_decide]); the log keeps its line.
         ))
         .then((v) {
+      if (v.kind == VerdictKind.confirmed) {
+        final alive = _siblings(s).where((o) => !_down(o)).toList();
+        if (alive.isNotEmpty) {
+          _note('info', 'dns: ${s.id} (${s.provider}, ${s.side}) does not answer, its provider still does through ${alive.map((o) => o.id).join(', ')}: not an event');
+        } else {
+          _note(
+              'info',
+              found.kind == 'node'
+                  ? 'DNS server ${s.id} (via VPN) does not answer on the exit node ${found.exit}, it answers through ${found.via}'
+                  : 'DNS server ${s.id} (${s.path == 'proxy' ? 'via VPN' : 'direct'}) does not answer');
+        }
+      }
       if (found.nodeSilent && v.kind != VerdictKind.confirmed) {
         _note('info', 'dns: ${s.id} (${s.side}) does not answer and the exit node ${node?.call()} carries no traffic either: not the server\'s doing, no verdict');
       }
@@ -1109,7 +1305,7 @@ class DnsFailover {
   Future<void> _decide() async {
     if (_stopped) return;
     _syncPark();
-    final wrote = <String>{}, dropped = <String>{}, raceMoved = <String>{};
+    final wrote = <String>{}, dropped = <String>{}, raceMoved = <String>{}, startMoved = <String>{};
     String? hint = _hintNext;
     _hintNext = null;
     if (!auto) {
@@ -1145,31 +1341,153 @@ class DnsFailover {
       }
       for (final g in _groups) {
         if (_stopped) return;
-        if (g.multi && g.raced) await _settleGroup(g, now, wrote, dropped, raceMoved);
+        if (g.multi && g.raced) await _settleGroup(g, now, wrote, dropped, raceMoved, startMoved);
       }
       if (_groups.any((g) => g.owed != null)) unawaited(_raceOwed());
     }
+    final moves = <_Move>[], downs = <_Side>[], ups = <(_Side, _Node, _Outage)>[];
     for (final s in _sides) {
       if (_stopped) return;
-      final was = s.effective, now = _pick(s);
+      final pick = _pick(s);
+      if (wrote.contains(s.name) && pick != null) await _verify(s, 'after a flag write', want: pick);
+      final was = s.effective;
+      if (pick == null) {
+        s.effective = null;
+        continue;
+      }
+      // Every server of the side down: nowhere to switch. The selection stays (the top candidate that sing-box answers with
+      // when no flag is on is not a move), the side is told once as [DnsDown]; the first server that answers again is [DnsUp].
+      final out = s.outage;
+      if (out != null) {
+        final answering = [for (final n in s.members) if (!_down(n) && n.w.health.answered) n];
+        if (answering.isEmpty) continue;
+        s.outage = null;
+        s.effective = answering.first;
+        if (out.announced) ups.add((s, answering.first, out));
+        continue;
+      }
+      if (s.members.every(_down)) {
+        if (_ready) {
+          s.outage = _Outage(_clock(), announced: true);
+          downs.add(s);
+        }
+        continue;
+      }
+      // no flag on: sing-box answers with the top candidate, the selection of the core stays where it was
+      final now = s.members.any((n) => n.on) ? pick : was ?? pick;
       s.effective = now;
-      if (wrote.contains(s.name) && now != null) await _verify(s, 'after a flag write');
-      if (was == null || now == null || identical(was, now)) continue;
+      if (was == null || identical(was, now)) continue;
       // `failover`: a flag went off on this side in this pass; `back`: a flag came on again (or the side's state
-      // changed without a verdict); `node`: another exit node's verdicts; `off`: automatic switching was turned off.
-      final reason = hint ?? (dropped.contains(s.name) ? 'failover' : raceMoved.contains(s.name) ? 'race' : 'back');
-      // the winner of a race that nothing failed before is an ordinary choice: the race's own log line says it, no event
-      if (reason == 'race') continue;
+      // changed without a verdict); `node`: another exit node's verdicts; `off`: automatic switching was turned off;
+      // `race`: the protocol race after another network / exit node picked another one; `start`: the first race.
+      final reason = hint ??
+          (dropped.contains(s.name)
+              ? 'failover'
+              : raceMoved.contains(s.name)
+                  ? 'race'
+                  : startMoved.contains(s.name)
+                      ? 'start'
+                      : 'back');
+      // the winner of the race at the start is an ordinary choice: the race's own log line says it, no record
+      if (reason == 'start') continue;
       _note('info', 'dns ${s.name}: ${was.id} → ${now.id} ($reason)');
-      if (!_switches.isClosed) {
-        _switches.add(DnsSwitch(
-          side: s.name,
-          from: was.id,
-          to: now.id,
-          fromProvider: was.provider,
-          toProvider: now.provider,
-          reason: reason,
-          at: _clock(),
+      moves.add(_Move(s.name, was, now, reason));
+    }
+    _tellMoves(moves);
+    _tellOutages(downs, ups);
+  }
+
+  // The silent transports of the provider of [n] on its side (their kinds, in the provider's order).
+  List<String> _silentKinds(_Node n) => {for (final o in n.group?.members ?? [n]) if (_silent(o)) o.kind}.toList();
+
+  // Since when the silent transports of [n]'s provider miss (ms since epoch); [at] when none does.
+  int _silentSince(_Node n, int at) {
+    final ts = [for (final o in n.group?.members ?? [n]) if (_silent(o)) o.missSince ?? o.missAt].whereType<int>();
+    return ts.isEmpty ? at : ts.reduce((a, b) => a < b ? a : b);
+  }
+
+  // The moves of one pass as records: per cause (the reason) one record for all the sides it moved; a move inside a provider
+  // (another transport) is a [DnsTransportChange], else a [DnsSwitch].
+  void _tellMoves(List<_Move> moves) {
+    final at = _clock();
+    final groups = <String, List<_Move>>{};
+    for (final m in moves) {
+      groups.putIfAbsent('${m.from.provider == m.to.provider ? 'transport' : 'switch'} ${m.reason}', () => []).add(m);
+    }
+    for (final e in groups.entries) {
+      final list = e.value;
+      if (e.key.startsWith('transport')) {
+        final sides = [
+          for (final m in list)
+            () {
+              final silent = _silentKinds(m.from);
+              return DnsTransportChangeSide(
+                  side: m.side,
+                  provider: m.to.provider,
+                  name: _name(m.to.provider),
+                  from: silent.contains(m.from.kind) ? silent : [m.from.kind],
+                  to: m.to.kind,
+                  ms: m.to.w.health.ms < 0 ? -1 : m.to.w.health.ms);
+            }(),
+        ];
+        final first = sides.first;
+        final same = sides.length > 1 &&
+            sides.every((s) => s.provider == first.provider && s.to == first.to && s.from.join(',') == first.from.join(','));
+        if (!_transports.isClosed) _transports.add(DnsTransportChange(sides: sides, same: same, at: at));
+      } else {
+        final sides = [
+          for (final m in list)
+            DnsSwitchSide(
+                side: m.side,
+                from: DnsEndFrom(
+                    provider: m.from.provider, name: _name(m.from.provider), silent: _silentKinds(m.from), since: _silentSince(m.from, at)),
+                to: DnsEndTo(
+                    provider: m.to.provider, name: _name(m.to.provider), kind: m.to.kind, ms: m.to.w.health.ms < 0 ? -1 : m.to.w.health.ms)),
+        ];
+        final first = sides.first;
+        final same = sides.length > 1 && sides.every((s) => s.from.provider == first.from.provider && s.to.provider == first.to.provider);
+        if (!_switches.isClosed) _switches.add(DnsSwitch(sides: sides, same: same, reason: list.first.reason, at: at));
+      }
+    }
+  }
+
+  // The sides that went out of DNS in one pass are one [DnsDown], the ones that came back one [DnsUp].
+  void _tellOutages(List<_Side> downs, List<(_Side, _Node, _Outage)> ups) {
+    final at = _clock();
+    if (downs.isNotEmpty) {
+      for (final s in downs) {
+        _note('warn', 'dns ${s.name}: every server is down, nowhere to switch: ${s.effective?.id} stays selected');
+      }
+      final nodes = [for (final s in downs.where((s) => s.name == 'vpn')) for (final n in s.members) n.nodeRows].whereType<List<DnsNodeRow>>().firstOrNull;
+      if (!_outages.isClosed) {
+        _outages.add(DnsDown(
+          sides: [
+            for (final s in downs)
+              DnsDownSide(
+                side: s.name,
+                servers: [
+                  for (final p in {for (final n in s.members) n.provider})
+                    DnsEnd(provider: p, name: _name(p), kinds: {for (final n in s.members) if (n.provider == p) n.kind}.toList()),
+                ],
+                selected: s.effective?.provider ?? '',
+              ),
+          ],
+          noSpare: downs.every((s) => {for (final n in s.members) n.provider}.length <= 1),
+          nodes: nodes,
+          at: at,
+        ));
+      }
+    }
+    if (ups.isNotEmpty) {
+      for (final u in ups) {
+        _note('info', 'dns ${u.$1.name}: ${u.$2.id} answers again');
+      }
+      final since = ups.map((u) => u.$3.since).reduce((a, b) => a < b ? a : b);
+      if (!_outages.isClosed) {
+        _outages.add(DnsUp(
+          afterMs: at - since,
+          sides: [for (final u in ups) DnsUpSide(side: u.$1.name, provider: u.$2.provider, name: _name(u.$2.provider), kind: u.$2.kind)],
+          at: at,
         ));
       }
     }
@@ -1178,11 +1496,12 @@ class DnsFailover {
   // The flags of a group that has raced follow its winner: the winner on, the others in reserve (off, no failure). With no
   // winner (it failed, or the race found none) the best protocol known to work takes over; none = the provider is out and
   // the next one by priority answers (the flags of the others are what they were).
-  Future<void> _settleGroup(_Group g, int now, Set<String> wrote, Set<String> dropped, Set<String> raceMoved) async {
+  Future<void> _settleGroup(_Group g, int now, Set<String> wrote, Set<String> dropped, Set<String> raceMoved, Set<String> startMoved) async {
     var w = g.winner;
     var byRace = g.fresh;
-    // a race after the winner failed moves the side like the failover does (an event); any other race is a plain choice
-    final why = g.freshWhy, moved = byRace && why != 'failure' ? raceMoved : dropped;
+    // a race after the winner failed moves the side like the failover does; the one after another network / exit node is a
+    // move of its own (`race`); the first one, at the start, is a plain choice
+    final why = g.freshWhy, moved = byRace && why != 'failure' ? (why == 'start' ? startMoved : raceMoved) : dropped;
     g.fresh = false;
     if (w != null && !w.on && !_fit(w, now)) {
       w = g.winner = null; // chosen, but gone silent meanwhile
@@ -1250,8 +1569,8 @@ class DnsFailover {
 
   /// Asks sing-box which candidate answers [s] until it is the one the flags say (the file is applied), and
   /// tells how long it took; a warning when it did not within [flagWait].
-  Future<void> _verify(_Side s, String why) async {
-    final want = s.effective;
+  Future<void> _verify(_Side s, String why, {_Node? want}) async {
+    want ??= s.effective;
     final check = flagCheck;
     if (want == null || want.c == null || check == null) return;
     if (s.members.length < 2) return; // one candidate: the config has no flag rule to look at

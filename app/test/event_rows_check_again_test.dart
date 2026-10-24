@@ -1,8 +1,8 @@
-// Event rows, the second line and Check again (docs/logs.md «Заголовок и подробности», docs/connect-model.md «Строка
-// ноды в событии», «Check again»): an event row shows its title and its sub line as two lines; Check again on
-// site/blocked and site/unreachable while the VPN is on (one press calls recheckSite once, shows progress, a press
-// meanwhile does nothing, the same event is changed in place); «Earlier checks» in the expanded row; a reopened event
-// has no Check again / Create rule; a server row names the node and its protocol (serverLabel) and scrolls when it
+// Event rows, the second line and retries (docs/logs.md «Заголовок и подробности», docs/connect-model.md «Строка ноды в
+// событии», «Карточка сайта», «Check again»): an event row shows its title and its sub line as two lines; a site card
+// has no Check again button (a retry is the tap on a Checked row: one press calls recheckSite once for the event, shows
+// progress, a press meanwhile does nothing, the same event is changed in place); «Earlier checks» in the expanded row;
+// a reopened event has no Create rule; a server row names the node and its protocol (serverLabel) and scrolls when it
 // does not fit (MarqueeText). MarqueeText: still when the text fits, scrolls to the left when it does not, ellipsis
 // with disableAnimations, still with TickerMode off, disposed cleanly.
 import 'dart:async';
@@ -47,12 +47,14 @@ Map<String, dynamic> _blocked({String host = 'blocked.example'}) => {
   'rule': {'kind': 'final'},
 };
 
-/// A site/unreachable event: the work route failed and no other route was tried.
+/// A site/unreachable event: the work route failed; the one other route tried is `sub1::n2` (a Checked row).
 Map<String, dynamic> _unreachable() => {
   'host': 'dead.example',
   'entry': 'main',
   'server': 'sub1::n1',
-  'tried': <Object>[],
+  'tried': [
+    {'entry': 'main', 'server': 'sub1::n2'},
+  ],
 };
 
 /// One earlier check of a site (as `data.checks` carries it): what it said and through which server it opened.
@@ -80,12 +82,11 @@ void _catalog(FakeCoreHost host, {String oneName = 'One'}) {
   );
 }
 
-String _titleOf(FakeCoreHost host, Map<String, dynamic> e) =>
-    EventWords(_en, host.catalog).describe(EventRecord.fromJson(e)).title;
-
-/// Opens the row by a tap on its title, as on the page. Plain pumps: a progress indicator or a marquee never settles.
-Future<void> _expand(WidgetTester tester, String title) async {
-  await tester.tap(find.text(title).first);
+/// Opens a site card by a tap on its header, which names the host (the header words are the card's own).
+/// Plain pumps: a progress indicator or a marquee never settles.
+Future<void> _openSite(WidgetTester tester, Map<String, dynamic> e) async {
+  final host = (e['data'] as Map)['host'] as String;
+  await tester.tap(find.textContaining(host).first);
   await tester.pump(const Duration(milliseconds: 500));
 }
 
@@ -256,47 +257,46 @@ void main() {
     });
   });
 
-  group('Check again (docs/connect-model.md «Check again»)', () {
-    for (final (type, phase, shown) in [
-      ('blocked', ConnectionPhase.connected, true),
-      ('unreachable', ConnectionPhase.connected, true),
-      ('blocked', ConnectionPhase.disconnected, false),
-      ('unreachable', ConnectionPhase.disconnected, false),
-    ]) {
-      testWidgets('site/$type with the VPN ${phase.name}: Check again ${shown ? 'is' : 'is not'} shown', (tester) async {
-        final host = _RecheckHost()..setPhase(phase);
+  group('a site card has no Check again (docs/connect-model.md «Карточка сайта»)', () {
+    for (final type in ['blocked', 'unreachable']) {
+      testWidgets('site/$type with the VPN on: no Check again, the row is there', (tester) async {
+        final host = _RecheckHost()..setPhase(ConnectionPhase.connected);
         _catalog(host);
         final e = _ev(host, 'site', type, data: type == 'blocked' ? _blocked() : _unreachable());
         await _pump(tester, host, e['id'] as int);
-        expect(find.text(_titleOf(host, e)), findsWidgets, reason: 'the row is there');
-        expect(find.text('Check again'), shown ? findsOneWidget : findsNothing);
+        expect(find.textContaining(type == 'blocked' ? 'blocked.example' : 'dead.example'), findsWidgets, reason: 'the row is there');
+        expect(find.text('Check again'), findsNothing);
       });
     }
+  });
 
-    testWidgets('a press calls recheckSite once with the id; meanwhile the button shows progress and a press does nothing', (
+  group('retry through a Checked row (docs/connect-model.md «Check again», «Карточка сайта»)', () {
+    testWidgets('a tap on the Checked node row calls recheckSite once with the id; meanwhile the row shows progress and a press does nothing', (
       tester,
     ) async {
       final host = _RecheckHost()
         ..setPhase(ConnectionPhase.connected)
         ..recheckGate = Completer<bool>();
       _catalog(host);
-      final e = _ev(host, 'site', 'blocked', data: _blocked());
+      final e = _ev(host, 'site', 'unreachable', data: _unreachable());
       await _pump(tester, host, e['id'] as int);
+      await _openSite(tester, e);
 
-      await tester.tap(find.text('Check again'));
+      await tester.tap(find.textContaining('Two').first);
       await tester.pump(const Duration(milliseconds: 200));
       expect(host.rechecks, [e['id']]);
-      expect(find.byWidgetPredicate((w) => w is ProgressIndicator), findsWidgets, reason: 'the button shows progress');
+      expect(find.byWidgetPredicate((w) => w is ProgressIndicator), findsWidgets, reason: 'the row shows progress');
 
-      final again = find.text('Check again');
+      final again = find.textContaining('Two');
       if (again.evaluate().isNotEmpty) await tester.tap(again.first, warnIfMissed: false);
       await tester.pump(const Duration(milliseconds: 200));
       expect(host.rechecks, [e['id']], reason: 'no second call while the first one runs');
 
       host.recheckGate!.complete(true);
       await tester.pump(const Duration(milliseconds: 500));
-      expect(host.rechecks, [e['id']]);
-      expect(find.text('Check again'), findsOneWidget, reason: 'the button is back once the check is done');
+      await tester.tap(find.textContaining('Two').first);
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(host.rechecks, [e['id'], e['id']], reason: 'a finished check can be asked again');
     });
 
     testWidgets('the answer changes the same event in place: same id, no new event, the old check is under Earlier checks', (
@@ -304,15 +304,16 @@ void main() {
     ) async {
       final host = _RecheckHost()..setPhase(ConnectionPhase.connected);
       _catalog(host);
-      final e = _ev(host, 'site', 'blocked', data: _blocked());
+      final e = _ev(host, 'site', 'unreachable', data: _unreachable());
       final before = _check(0);
       host.onRecheck = (ev) {
         ev['rev'] = ((ev['rev'] as int?) ?? 0) + 1;
         ev['data'] = {...(ev['data'] as Map<String, dynamic>), 'checks': [before]};
       };
       await _pump(tester, host, e['id'] as int);
+      await _openSite(tester, e);
 
-      await tester.tap(find.text('Check again'));
+      await tester.tap(find.textContaining('Two').first);
       for (var i = 0; i < 6; i++) {
         await tester.pump(const Duration(seconds: 1));
       }
@@ -322,7 +323,6 @@ void main() {
 
       final lines = EventWords(_en, host.catalog).earlierChecks(EventRecord.fromJson(host.journal.single));
       expect(lines, isNotEmpty);
-      await _expand(tester, _titleOf(host, e));
       expect(_earlierHeading, findsOneWidget);
       for (final line in lines) {
         expect(find.text(line), findsOneWidget, reason: line);
@@ -346,7 +346,7 @@ void main() {
       final lines = EventWords(_en, host.catalog).earlierChecks(EventRecord.fromJson(e));
       expect(lines, isNotEmpty);
       await _pump(tester, host, e['id'] as int);
-      await _expand(tester, _titleOf(host, e));
+      await _openSite(tester, e);
       expect(_earlierHeading, findsOneWidget);
       for (final line in lines) {
         expect(find.text(line), findsOneWidget, reason: line);
@@ -358,26 +358,19 @@ void main() {
       _catalog(host);
       final e = _ev(host, 'site', 'blocked', data: _blocked());
       await _pump(tester, host, e['id'] as int);
-      await _expand(tester, _titleOf(host, e));
+      await _openSite(tester, e);
       expect(_earlierHeading, findsNothing);
     });
 
-    testWidgets('a reopened event has no Check again (connected) and no Create rule (disconnected)', (tester) async {
-      // the folded row holds up to three buttons, so Check again and Create rule are not looked for together
-      final host = _RecheckHost()..setPhase(ConnectionPhase.connected);
+    testWidgets('a reopened event has no Create rule and no retry', (tester) async {
+      final host = _RecheckHost()..setPhase(ConnectionPhase.disconnected);
       _catalog(host);
-      final open = _ev(host, 'site', 'unreachable', data: _unreachable());
-      await _pump(tester, host, open['id'] as int);
-      expect(find.text('Check again'), findsOneWidget, reason: 'precondition: an open site has it');
-
-      final reopened = {..._unreachable(), 'reopened': {'at': _at(10), 'entry': 'main', 'server': 'sub1::n2'}};
-      final closed = _ev(host, 'site', 'unreachable', data: reopened);
+      final reopened = {..._blocked(), 'reopened': {'at': _at(10), 'entry': 'main', 'server': 'sub1::n2'}};
+      final closed = _ev(host, 'site', 'blocked', data: reopened);
       await _pump(tester, host, closed['id'] as int);
-      expect(find.text('Check again'), findsNothing, reason: 'connected, but the event is closed');
-
-      host.setPhase(ConnectionPhase.disconnected);
-      await _pump(tester, host, closed['id'] as int);
-      expect(find.text('Create rule'), findsNothing, reason: 'the closed event has no Create rule');
+      await _openSite(tester, closed);
+      expect(find.text('Create blocked.example rule'), findsNothing, reason: 'the closed event has no Create rule');
+      expect(find.text('Check again'), findsNothing);
     });
   });
 
@@ -387,7 +380,7 @@ void main() {
       _catalog(host);
       final e = _ev(host, 'site', 'blocked', data: _blocked());
       await _pump(tester, host, e['id'] as int);
-      await _expand(tester, _titleOf(host, e));
+      await _openSite(tester, e);
 
       final words = EventWords(_en, host.catalog);
       for (final key in ['sub1::n1', 'sub1::n2']) {
@@ -403,7 +396,7 @@ void main() {
       _catalog(host, oneName: _long);
       final e = _ev(host, 'site', 'blocked', data: _blocked());
       await _pump(tester, host, e['id'] as int);
-      await _expand(tester, _titleOf(host, e));
+      await _openSite(tester, e);
       expect(find.byType(MarqueeText), findsWidgets);
     });
   });

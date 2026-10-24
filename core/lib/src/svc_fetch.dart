@@ -680,8 +680,7 @@ class _Call {
 
     final done = await Future.wait(peers.map(one));
     return [
-      for (final p in done)
-        if (p != null) p,
+      for (final p in done) ?p,
     ];
   }
 
