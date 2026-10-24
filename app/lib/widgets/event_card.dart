@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../l10n/l10n.dart';
 import '../theme/app_colors.g.dart';
+import 'app_sheet.dart' show showToast;
 import 'marquee_text.dart';
 
 /// The generic event card (`connect-model.md`, "Новый вид карточки"): a header, a title, an optional neutral
@@ -82,9 +85,17 @@ class DataBox extends CardBlock {
 }
 
 class CardAction {
-  const CardAction({required this.label, required this.onTap, this.details = false});
+  const CardAction({required this.label, required this.onTap, this.details = false}) : onMenu = null;
+
+  /// A button that opens a menu: [onMenu] gets the button's rect in global coordinates, to anchor the menu to it.
+  const CardAction.menu({required this.label, required void Function(Rect at) this.onMenu})
+    : onTap = _none,
+      details = false;
+  static void _none() {}
+
   final String label;
   final VoidCallback onTap;
+  final void Function(Rect at)? onMenu;
 
   /// The "Details ▾" button: always first.
   final bool details;
@@ -98,6 +109,7 @@ class EventCardModel {
     this.repeats = 1,
     this.background = false,
     required this.title,
+    this.copy,
     this.transition,
     this.blocks = const [],
     this.cause,
@@ -113,6 +125,9 @@ class EventCardModel {
   final int repeats;
   final bool background;
   final String title;
+
+  /// A part of [title] that can be copied (a site's host): drawn with a copy icon before it; a tap on either copies it.
+  final String? copy;
 
   /// The grey "A > B" line under the title (neutral chips).
   final (String, String)? transition;
@@ -181,7 +196,7 @@ class EventCard extends StatelessWidget {
           _Header(model: m, color: lc),
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: Text(m.title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: c.t1)),
+            child: _Title(model: m, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: c.t1), icon: c.accent),
           ),
           if (m.transition != null) _Transition(from: m.transition!.$1, to: m.transition!.$2),
           for (final b in m.blocks) CardBlockView(block: b),
@@ -194,9 +209,15 @@ class EventCard extends StatelessWidget {
                 runSpacing: 6,
                 children: [
                   for (final (i, a) in m.actions.indexed)
-                    OutlinedButton(
+                    Builder(builder: (bc) => OutlinedButton(
                       key: ValueKey('eventCard.action.$i'),
-                      onPressed: a.onTap,
+                      onPressed: a.onMenu == null
+                          ? a.onTap
+                          : () {
+                              final box = bc.findRenderObject() as RenderBox?;
+                              if (box == null || !box.hasSize) return;
+                              a.onMenu!(box.localToGlobal(Offset.zero) & box.size);
+                            },
                       style: OutlinedButton.styleFrom(
                         foregroundColor: a.details ? c.t2 : c.accent,
                         side: BorderSide(color: c.borderHi),
@@ -205,7 +226,7 @@ class EventCard extends StatelessWidget {
                         minimumSize: const Size(0, 34),
                       ),
                       child: Text(a.label),
-                    ),
+                    )),
                 ],
               ),
             ),
@@ -272,6 +293,59 @@ class _Header extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// The title; its [EventCardModel.copy] part gets a copy icon before it, and a tap on the icon or that part copies it.
+class _Title extends StatelessWidget {
+  const _Title({required this.model, required this.style, required this.icon});
+  final EventCardModel model;
+  final TextStyle style;
+  final Color icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = model.title, cp = model.copy;
+    final at = cp == null || cp.isEmpty ? -1 : t.indexOf(cp);
+    if (at < 0) return Text(t, style: style);
+    final v = cp!;
+    Future<void> copy() async {
+      await Clipboard.setData(ClipboardData(text: v));
+      if (context.mounted) showToast(context, context.l10n.copied);
+    }
+
+    return Text.rich(
+      TextSpan(
+        style: style,
+        children: [
+          if (at > 0) TextSpan(text: t.substring(0, at)),
+          WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: GestureDetector(
+              key: const ValueKey('eventCard.copy'),
+              behavior: HitTestBehavior.opaque,
+              onTap: copy,
+              child: Text.rich(
+                TextSpan(
+                  style: style,
+                  children: [
+                    WidgetSpan(
+                      alignment: PlaceholderAlignment.middle,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: Icon(LucideIcons.copy, size: 16, color: icon),
+                      ),
+                    ),
+                    TextSpan(text: v),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          TextSpan(text: t.substring(at + v.length)),
+        ],
+      ),
     );
   }
 }
@@ -480,6 +554,7 @@ class _KeyRowView extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = _pal(context);
     final chev = Icon(Icons.chevron_right, size: 18, color: c.accent);
+    final out = Icon(LucideIcons.squareArrowOutUpRight, size: 18, color: c.accent);
     return InkWell(
       key: const ValueKey('eventCard.row'),
       onTap: row.onTap,
@@ -502,7 +577,7 @@ class _KeyRowView extends StatelessWidget {
               InkWell(
                 key: const ValueKey('eventCard.go'),
                 onTap: row.onGo,
-                child: Padding(padding: const EdgeInsets.all(4), child: chev),
+                child: Padding(padding: const EdgeInsets.all(4), child: out),
               )
             else if (row.onTap != null)
               chev,
@@ -534,7 +609,7 @@ class _CheckRowView extends StatelessWidget {
               children: [
                 SizedBox(
                   width: 44,
-                  child: retry == null ? null : Center(child: Icon(Icons.refresh, size: 18, color: c.accent)),
+                  child: retry == null ? null : Center(child: Icon(LucideIcons.refreshCw, size: 18, color: c.accent)),
                 ),
                 Expanded(
                   child: Padding(
@@ -557,7 +632,7 @@ class _CheckRowView extends StatelessWidget {
                   InkWell(
                     key: const ValueKey('eventCard.go'),
                     onTap: row.onGo,
-                    child: SizedBox(width: 44, child: Center(child: Icon(Icons.chevron_right, size: 18, color: c.accent))),
+                    child: SizedBox(width: 44, child: Center(child: Icon(LucideIcons.squareArrowOutUpRight, size: 18, color: c.accent))),
                   ),
                 ],
               ),

@@ -85,8 +85,8 @@ void _catalog(FakeCoreHost host, {String oneName = 'One'}) {
 /// Opens a site card by a tap on its header, which names the host (the header words are the card's own).
 /// Plain pumps: a progress indicator or a marquee never settles.
 Future<void> _openSite(WidgetTester tester, Map<String, dynamic> e) async {
-  final host = (e['data'] as Map)['host'] as String;
-  await tester.tap(find.textContaining(host).first);
+  // "Details ▾" (the first action) opens the card; a tap on the host in the title copies it instead
+  await tester.tap(find.byKey(const ValueKey('eventCard.action.0')).first);
   await tester.pump(const Duration(milliseconds: 500));
 }
 

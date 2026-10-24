@@ -131,7 +131,7 @@ class _Calls {
         nodeInfo: _nodeInfo,
         ruleFor: (host) => rule,
         onDetails: () => log.add('details'),
-        onIgnore: () => log.add('ignore'),
+        onIgnore: (_) => log.add('ignore'),
         onOpenApp: () => log.add('app'),
         onOpenRule: (id) => log.add('rule:$id'),
         onCreateRule: () => log.add('createRule'),
@@ -177,6 +177,12 @@ void main() {
 
     test('blocked with nothing tried: own and the opening one, 1 of 2', () {
       expect(_card('blocked', _blocked(), _Calls().ctx()).title, 'shop.example did not open on 1 of 2 servers');
+    });
+
+    test('the copy part of the title is the host, for unreachable and blocked', () {
+      for (final type in ['unreachable', 'blocked']) {
+        expect(_card(type, _data(type), _Calls().ctx()).copy, _host);
+      }
     });
   });
 
@@ -315,7 +321,7 @@ void main() {
         expect(m.actions.any((a) => a.label.contains('Check again')), isFalse);
 
         m.actions.first.onTap();
-        m.actions[1].onTap();
+        m.actions[1].onMenu!(Rect.zero);
         expect(c.log, ['details', 'ignore']);
       });
     }

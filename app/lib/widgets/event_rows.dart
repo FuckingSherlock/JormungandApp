@@ -615,14 +615,15 @@ class EventRow extends StatelessWidget {
     final netBlocks = e.cat == 'net' && e.type == 'switched' ? netDnsBlocks(e, dnsCtx) : const <CardBlock>[];
 
     // "Ignore site ▾": Everywhere / On this route only (not kept anywhere yet: dimmed), Ignored sites…
-    Future<void> ignoreMenu(String site) async {
-      final box = context.findRenderObject() as RenderBox?;
-      if (box == null) return;
-      final o = box.localToGlobal(Offset.zero), screen = MediaQuery.sizeOf(context);
+    Future<void> ignoreMenu(String site, Rect at) async {
+      // under the button, its left edge on the button's (the menu route lays out in the overlay's coordinates)
+      final overlay = Navigator.of(context).overlay?.context.findRenderObject() as RenderBox?;
+      if (overlay == null) return;
+      final o = overlay.globalToLocal(at.bottomLeft);
       final picked = await showMenu<String>(
         context: context,
         popUpAnimationStyle: AnimationStyle.noAnimation,
-        position: RelativeRect.fromLTRB(o.dx + 14, o.dy + box.size.height - 110, screen.width - o.dx - box.size.width, 0),
+        position: RelativeRect.fromRect(Rect.fromLTWH(o.dx, o.dy, 0, 0), Offset.zero & overlay.size),
         items: [
           CheckedPopupMenuItem(value: 'all', checked: logs.isSiteIgnored(site), child: Text(l10n.everywhere)),
           CheckedPopupMenuItem(enabled: false, value: 'route', checked: false, child: Text(l10n.onThisRouteOnly)),
@@ -677,7 +678,7 @@ class EventRow extends StatelessWidget {
             return null;
           },
           onDetails: () => logs.toggleRow(g.key),
-          onIgnore: () => ignoreMenu(siteHost),
+          onIgnore: (at) => ignoreMenu(siteHost, at),
           onOpenApp: () {
             // the dialog of the app: through the app-rule link when wired, else the plain app link
             final g = links.openAppRule, f = links.openAppAct;

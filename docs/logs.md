@@ -450,7 +450,7 @@ Reset считают только отличия от этого состоян�
 | `conn/offline` / `online` | пара, без подключения | Network settings | журнал: VPN выключен, сообщать не о чем |
 | `net/switched` (новое) | корень сведений в окне смены (переподключение, `dns/switched`, `auto/switched`, `auto/fastest`); подтверждённые сбои (`site/*`, `conn/failing`, `rules/fallback`) под неё не идут — смена не уведомляет, а сбой, устоявший после неё, должен | — | журнал: сведения |
 | `conn/failing` | следствие `site/*` про тот же адрес в том же окне | **Create rule**, Open (приложение в Per-app) | `blocked` |
-| `site/blocked` / `unreachable` | ×N: один сайт из разных приложений — одна строка, приложения внутри | Check again (пока VPN включён; `connect-model.md` → «Check again»), Check with checker, Copy site, **Create rule** (только `blocked` без приложения; с приложением — строка «Rule», `connect-model.md` «Строки причины»), **Ignore site** | `blocked` |
+| `site/blocked` / `unreachable` | ×N: один сайт из разных приложений — одна строка, приложения внутри | карточка (`connect-model.md` → «Карточка сайта»): перепроверка рядов маршрута / нод / чекера, копирование хоста значком в заголовке, ряд **Rule** (своё правило или правило приложения), **Ignore site ▾** | `blocked` |
 
 **Auto, DNS**
 

@@ -1,11 +1,14 @@
 // Generic event card (app/lib/widgets/event_card.dart, docs/connect-model.md:944-958): the card knows nothing about
-// event types, it draws a model. Checked here: the switch frame (one row, two-line label, two rows, heading), the data
+// event types, it draws a model. Checked here: the title's copy target (a host with a copy icon before it, one tap
+// target, copies exactly the host and shows «Copied», does not reach the card's InkWell; plain title without a copy
+// part), a menu action's button rect (global, the same size and top-left as the button), the switch frame (one row, two-line label, two rows, heading), the data
 // box (key rows with a tap and a go control, sections, check rows ok and bad with retry and go), the cause line, the
 // Details ▾ action always first, the header (icon, time, ×N, neutral transition, level label), the level stripe
 // (warn, error and info differ; colours come from the app theme), the frame background = data-box row background,
 // the red / green check-row gradients from one table (the same under two app themes), and a 320 px width at 120 %
 // text without overflow. Controls are found by the keys the card gives them.
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jormungand/l10n/gen/app_localizations.dart';
@@ -15,8 +18,25 @@ import 'package:jormungand/widgets/event_card.dart';
 const _retryKey = ValueKey('eventCard.retry');
 const _goKey = ValueKey('eventCard.go');
 const _rowKey = ValueKey('eventCard.row');
+const _copyKey = ValueKey('eventCard.copy');
+const _host = 'shop.example';
 
-Future<void> _pump(WidgetTester t, EventCardModel model, {ThemeData? theme, double textScale = 1}) async {
+/// Routes the platform clipboard into [sink] for the rest of the test.
+void _mockClipboard(List<String> sink) {
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+    if (call.method == 'Clipboard.setData') sink.add((call.arguments as Map)['text'] as String);
+    return null;
+  });
+  addTearDown(() => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+}
+
+Future<void> _pump(
+  WidgetTester t,
+  EventCardModel model, {
+  ThemeData? theme,
+  double textScale = 1,
+  Widget Function(Widget card)? wrap,
+}) async {
   await t.pumpWidget(
     MaterialApp(
       theme: theme,
@@ -33,7 +53,7 @@ Future<void> _pump(WidgetTester t, EventCardModel model, {ThemeData? theme, doub
         child: w!,
       ),
       home: Scaffold(
-        body: SingleChildScrollView(child: EventCard(model: model)),
+        body: SingleChildScrollView(child: wrap == null ? EventCard(model: model) : wrap(EventCard(model: model))),
       ),
     ),
   );
@@ -44,6 +64,7 @@ Future<void> _pump(WidgetTester t, EventCardModel model, {ThemeData? theme, doub
 EventCardModel _model({
   CardLevel level = CardLevel.warn,
   String title = 'DNS switched',
+  String? copy,
   IconData? icon,
   String? time,
   int repeats = 1,
@@ -57,6 +78,7 @@ EventCardModel _model({
   time: time,
   repeats: repeats,
   title: title,
+  copy: copy,
   transition: transition,
   blocks: blocks,
   cause: cause,
@@ -497,5 +519,86 @@ void main() {
 
     expect(t.takeException(), isNull);
     expect(t.getSize(find.byType(EventCard)).width, lessThanOrEqualTo(320));
+  });
+
+  for (final (title, parts) in [
+    ('shop.example did not open on 3 servers', ['did not open on 3 servers']),
+    ('Site shop.example blocked', ['Site', 'blocked']),
+  ]) {
+    testWidgets('copy: "$title" keeps every part readable; the host has a copy icon before it', (t) async {
+      await _pump(t, _model(title: title, copy: _host));
+      expect(find.byKey(_copyKey), findsOneWidget);
+      final icon = find.descendant(of: find.byKey(_copyKey), matching: find.byType(Icon));
+      expect(icon, findsOneWidget);
+      expect(t.getCenter(icon).dx, lessThan(t.getCenter(find.byKey(_copyKey)).dx), reason: 'the icon is before the host');
+      expect(find.textContaining(_host, findRichText: true), findsOneWidget);
+      for (final part in parts) {
+        expect(find.textContaining(part, findRichText: true), findsOneWidget);
+      }
+    });
+  }
+
+  testWidgets('copy: a tap on the copy target puts exactly the host on the clipboard and shows "Copied"', (t) async {
+    final clip = <String>[];
+    _mockClipboard(clip);
+    await _pump(t, _model(title: 'shop.example did not open on 3 servers', copy: _host));
+    await t.tap(find.byKey(_copyKey));
+    await t.pump();
+    expect(clip, [_host]);
+    expect(find.text('Copied'), findsOneWidget);
+  });
+
+  testWidgets('copy: the icon and the host text are one tap target', (t) async {
+    final clip = <String>[];
+    _mockClipboard(clip);
+    await _pump(t, _model(title: 'shop.example did not open on 3 servers', copy: _host));
+    final rect = t.getRect(find.byKey(_copyKey));
+    await t.tapAt(Offset(rect.left + 2, rect.center.dy)); // on the icon
+    await t.tapAt(Offset(rect.right - 2, rect.center.dy)); // on the host text
+    await t.pump();
+    expect(clip, [_host, _host]);
+  });
+
+  testWidgets('copy: a tap on the copy target does not reach the card\'s InkWell', (t) async {
+    final clip = <String>[];
+    _mockClipboard(clip);
+    var taps = 0;
+    await _pump(
+      t,
+      _model(title: 'shop.example did not open on 3 servers', copy: _host),
+      wrap: (card) => InkWell(onTap: () => taps++, child: card),
+    );
+    await t.tap(find.byKey(_copyKey));
+    await t.pump();
+    expect(clip, [_host]);
+    expect(taps, 0);
+
+    // control: a tap elsewhere on the card does reach the InkWell
+    await t.tap(find.text('WARN'));
+    expect(taps, 1);
+  });
+
+  for (final (label, copy) in <(String, String?)>[
+    ('no copy', null),
+    ('empty copy', ''),
+    ('copy not in the title', 'nope.example'),
+  ]) {
+    testWidgets('copy: $label gives the plain title and no copy target', (t) async {
+      await _pump(t, _model(title: 'shop.example did not open on 3 servers', copy: copy));
+      expect(find.text('shop.example did not open on 3 servers'), findsOneWidget);
+      expect(find.byKey(_copyKey), findsNothing);
+    });
+  }
+
+  testWidgets('menu action: the callback gets the button rect in global coordinates (same size and top-left)', (t) async {
+    final rects = <Rect>[];
+    await _pump(t, _model(actions: [CardAction.menu(label: 'Ignore site ▾', onMenu: (r) => rects.add(r))]));
+    final button = find.byKey(const ValueKey('eventCard.action.0'));
+    final size = t.getSize(button);
+    final topLeft = t.getTopLeft(button);
+    await t.tap(button);
+    expect(rects, hasLength(1));
+    expect(rects.single.size, size);
+    expect(rects.single.topLeft, topLeft);
   });
 }

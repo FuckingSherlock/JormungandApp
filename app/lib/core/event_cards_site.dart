@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:jormungand_core/jormungand_core.dart' show EventRecord, SiteChecker, nodeKeyOfTag;
 
 import '../l10n/l10n.dart';
@@ -48,8 +49,9 @@ class SiteCardCtx {
   final ({String sub, String proto, String node})? Function(String nodeKey) nodeInfo;
   final VoidCallback onDetails;
 
-  /// Opens the "Ignore site ▾" dropdown (Everywhere / On this route only, "Ignored sites…"): the caller owns it.
-  final VoidCallback onIgnore;
+  /// Opens the "Ignore site ▾" dropdown (Everywhere / On this route only, "Ignored sites…") under the button at [at]
+  /// (global coordinates): the caller owns it.
+  final void Function(Rect at) onIgnore;
   final VoidCallback onOpenApp;
   final void Function(String ruleId) onOpenRule;
 
@@ -146,7 +148,7 @@ EventCardModel? siteCard(EventRecord e, SiteCardCtx ctx) {
           rows.add(
             KeyRow(
               name: l.rule,
-              icon: Icons.add,
+              icon: LucideIcons.squarePlus,
               value: l.createRule2(x.host),
               sub: fb.isEmpty || x.via.isEmpty ? null : l.fallback2(fb),
               onTap: ctx.onNewAppRule == null ? ctx.onCreateRule : () => ctx.onNewAppRule!(x.app, x.host, x.via),
@@ -181,7 +183,7 @@ EventCardModel? siteCard(EventRecord e, SiteCardCtx ctx) {
       rows.add(
         KeyRow(
           name: l.rule,
-          icon: Icons.add,
+          icon: LucideIcons.squarePlus,
           value: l.createRule2(host),
           sub: fb.isEmpty ? null : l.fallback2(fb),
           onTap: ctx.onCreateRule,
@@ -253,11 +255,12 @@ EventCardModel? siteCard(EventRecord e, SiteCardCtx ctx) {
     repeats: ctx.repeats,
     background: ctx.background || e.bg,
     title: title,
+    copy: host.isEmpty ? null : host,
     blocks: rows.isEmpty ? const [] : [DataBox(rows: rows)],
     cause: cause,
     actions: [
       CardAction(label: l.details, onTap: ctx.onDetails, details: true),
-      CardAction(label: '${l.ignoreSite} ▾', onTap: ctx.onIgnore),
+      CardAction.menu(label: '${l.ignoreSite} ▾', onMenu: ctx.onIgnore),
     ],
   );
 }
