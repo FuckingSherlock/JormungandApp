@@ -98,7 +98,14 @@ LinearGradient? _gradientOf(Widget w) {
 /// Colours of every gradient painted above the text [text] (the check row's own background).
 List<Color> _gradientColours(WidgetTester t, String text) {
   final boxes = find.ancestor(of: find.text(text), matching: find.byWidgetPredicate((w) => _gradientOf(w) != null));
-  return [for (final e in boxes.evaluate()) ..._gradientOf(e.widget)!.colors];
+  final out = [for (final e in boxes.evaluate()) ..._gradientOf(e.widget)!.colors];
+  // a check row paints its verdict as a layer under the content (a sibling, so it can fade): look in the row's own view
+  final rows = find.ancestor(of: find.text(text), matching: find.byWidgetPredicate((w) => w.runtimeType.toString() == '_CheckRowView'));
+  for (final r in rows.evaluate()) {
+    final layers = find.descendant(of: find.byElementPredicate((e) => e == r), matching: find.byWidgetPredicate((w) => _gradientOf(w) != null));
+    out.addAll([for (final e in layers.evaluate()) ..._gradientOf(e.widget)!.colors]);
+  }
+  return out;
 }
 
 bool _isRed(Color c) => c.r > c.g && c.r > c.b;

@@ -1,7 +1,9 @@
 // Event rows, the second line and retries (docs/logs.md «Заголовок и подробности», docs/connect-model.md «Строка ноды в
 // событии», «Карточка сайта», «Check again»): an event row shows its title and its sub line as two lines; a site card
-// has no Check again button (a retry is the tap on a Checked row: one press calls recheckSite once for the event, shows
-// progress, a press meanwhile does nothing, the same event is changed in place); «Earlier checks» in the expanded row;
+// has no Check again button (a retry is the tap on a row: one press calls recheckSiteNode once for the event and the
+// row, that row shows progress while the check runs, a press on the busy row meanwhile does nothing, other rows stay
+// usable, two rows can run at once, the same event is changed in place, no LinearProgressIndicator over the card);
+// «Earlier checks» in the expanded row;
 // a reopened event has no Create rule; a server row names the node and its protocol (serverLabel) and scrolls when it
 // does not fit (MarqueeText). MarqueeText: still when the text fits, scrolls to the left when it does not, ellipsis
 // with disableAnimations, still with TickerMode off, disposed cleanly.
@@ -47,14 +49,13 @@ Map<String, dynamic> _blocked({String host = 'blocked.example'}) => {
   'rule': {'kind': 'final'},
 };
 
-/// A site/unreachable event: the work route failed; the one other route tried is `sub1::n2` (a Checked row).
-Map<String, dynamic> _unreachable() => {
+/// A site/unreachable event: the work route failed; the other routes tried are `sub1::n2` and `sub1::n3` (Checked rows).
+Map<String, dynamic> _unreachable({List<String> tried = const ['sub1::n2']}) => {
   'host': 'dead.example',
   'entry': 'main',
   'server': 'sub1::n1',
-  'tried': [
-    {'entry': 'main', 'server': 'sub1::n2'},
-  ],
+  'tried': [for (final s in tried) {'entry': 'main', 'server': s}],
+  'nodes': [for (final s in tried) {'entry': 'main', 'server': s, 'ok': false}],
 };
 
 /// One earlier check of a site (as `data.checks` carries it): what it said and through which server it opened.
@@ -64,6 +65,14 @@ Map<String, dynamic> _check(int s, {String viaServer = 'sub1::n2'}) => {
   'server': 'sub1::n1',
   'via': 'Second',
   'viaServer': viaServer,
+};
+
+/// One earlier check of one node of a site (`kind: node`, as the core writes it after a per-row recheck).
+Map<String, dynamic> _nodeCheck(int s, String server, {required bool ok}) => {
+  'at': _at(s),
+  'kind': 'node',
+  'server': server,
+  'ok': ok,
 };
 
 /// A subscription with two servers: «One» (vless, n1) and «Two» (hysteria2, n2) under the id sub1.
@@ -77,9 +86,41 @@ void _catalog(FakeCoreHost host, {String oneName = 'One'}) {
       nodes: [
         CatalogNode(id: 'n1', name: oneName, protocol: 'vless', address: 'one.example.com'),
         CatalogNode(id: 'n2', name: 'Two', protocol: 'hysteria2', address: 'two.example.com'),
+        CatalogNode(id: 'n3', name: 'Three', protocol: 'vless', address: 'three.example.com'),
       ],
     ),
   );
+}
+
+/// Whether the busy indicator of a row is drawn in the row that shows [text] and none of [others]: the nearest ancestor
+/// of an indicator that holds [text] must hold no text of the other rows.
+bool _busyOn(WidgetTester tester, String text, {required List<String> others}) {
+  for (final b in find.byKey(const ValueKey('eventCard.busy')).evaluate()) {
+    var found = false;
+    b.visitAncestorElements((a) {
+      final texts = _textsUnder(a);
+      if (texts.any((s) => s.contains(text))) {
+        found = !texts.any((s) => others.any(s.contains));
+        return false;
+      }
+      return true;
+    });
+    if (found) return true;
+  }
+  return false;
+}
+
+/// The data of every Text under [root].
+List<String> _textsUnder(Element root) {
+  final out = <String>[];
+  void walk(Element e) {
+    final w = e.widget;
+    if (w is Text && w.data != null) out.add(w.data!);
+    e.visitChildren(walk);
+  }
+
+  walk(root);
+  return out;
 }
 
 /// Opens a site card by a tap on its header, which names the host (the header words are the card's own).
@@ -102,21 +143,29 @@ void _expectBelow(WidgetTester tester, Finder lower, Finder upper) {
   expect(a, greaterThan(b), reason: 'the lower text is at $a, the upper one at $b');
 }
 
-/// The host of these tests: a site check goes to [rechecks]; [recheckGate] holds the answer until the test completes
-/// it; [onRecheck] writes what the core writes into the event (the journal is what the rows show).
+/// The host of these tests: a row retry goes to [nodeRechecks] (the base class records it); [nodeGates] holds the
+/// answer of a node until the test completes it (a node without a gate answers at once); [onRecheck] writes what the
+/// core writes into the event (the journal is what the rows show). [rechecks] counts whole-site calls, which a row
+/// retry must not make.
 class _RecheckHost extends FakeCoreHost {
   final rechecks = <int>[];
-  Completer<bool>? recheckGate;
+  final nodeGates = <String, Completer<bool>>{};
   void Function(Map<String, dynamic> event)? onRecheck;
 
   @override
   Future<bool> recheckSite(int eventId) async {
     rechecks.add(eventId);
-    final g = recheckGate;
+    return super.recheckSite(eventId);
+  }
+
+  @override
+  Future<bool> recheckSiteNode(int eventId, String node) async {
+    final r = await super.recheckSiteNode(eventId, node);
+    final g = nodeGates[node];
     if (g != null) await g.future;
     final e = journal.where((x) => x['id'] == eventId).firstOrNull;
     if (e != null) onRecheck?.call(e);
-    return true;
+    return r;
   }
 }
 
@@ -271,12 +320,12 @@ void main() {
   });
 
   group('retry through a Checked row (docs/connect-model.md «Check again», «Карточка сайта»)', () {
-    testWidgets('a tap on the Checked node row calls recheckSite once with the id; meanwhile the row shows progress and a press does nothing', (
+    testWidgets('a tap on a Checked node row calls recheckSiteNode once with the event and the node; the row is busy meanwhile and a press does nothing', (
       tester,
     ) async {
       final host = _RecheckHost()
         ..setPhase(ConnectionPhase.connected)
-        ..recheckGate = Completer<bool>();
+        ..nodeGates['sub1::n2'] = Completer<bool>();
       _catalog(host);
       final e = _ev(host, 'site', 'unreachable', data: _unreachable());
       await _pump(tester, host, e['id'] as int);
@@ -284,19 +333,42 @@ void main() {
 
       await tester.tap(find.textContaining('Two').first);
       await tester.pump(const Duration(milliseconds: 200));
-      expect(host.rechecks, [e['id']]);
-      expect(find.byWidgetPredicate((w) => w is ProgressIndicator), findsWidgets, reason: 'the row shows progress');
+      expect(host.nodeRechecks, [(eventId: e['id'] as int, node: 'sub1::n2')]);
+      expect(host.rechecks, isEmpty, reason: 'a row retry is not a whole-site check');
+      expect(_busyOn(tester, 'Two', others: ['Three', 'One']), isTrue, reason: 'the row shows progress');
+      expect(find.byType(LinearProgressIndicator), findsNothing, reason: 'no progress bar over the card');
 
-      final again = find.textContaining('Two');
-      if (again.evaluate().isNotEmpty) await tester.tap(again.first, warnIfMissed: false);
+      await tester.tap(find.textContaining('Two').first, warnIfMissed: false);
       await tester.pump(const Duration(milliseconds: 200));
-      expect(host.rechecks, [e['id']], reason: 'no second call while the first one runs');
+      expect(host.nodeRechecks, hasLength(1), reason: 'no second call while the first one runs');
 
-      host.recheckGate!.complete(true);
+      host.nodeGates['sub1::n2']!.complete(true);
       await tester.pump(const Duration(milliseconds: 500));
+      expect(_busyOn(tester, 'Two', others: ['Three', 'One']), isFalse, reason: 'the row is done');
       await tester.tap(find.textContaining('Two').first);
       await tester.pump(const Duration(milliseconds: 500));
-      expect(host.rechecks, [e['id'], e['id']], reason: 'a finished check can be asked again');
+      expect(host.nodeRechecks, hasLength(2), reason: 'a finished check can be asked again');
+    });
+
+    testWidgets('the own route row retries the own node: recheckSiteNode with the own key, the row is busy meanwhile', (
+      tester,
+    ) async {
+      final host = _RecheckHost()
+        ..setPhase(ConnectionPhase.connected)
+        ..nodeGates['sub1::n1'] = Completer<bool>();
+      _catalog(host);
+      final e = _ev(host, 'site', 'unreachable', data: _unreachable());
+      await _pump(tester, host, e['id'] as int);
+      await _openSite(tester, e);
+
+      await tester.tap(find.textContaining('One').first);
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(host.nodeRechecks, [(eventId: e['id'] as int, node: 'sub1::n1')]);
+      expect(_busyOn(tester, 'One', others: ['Two', 'Three']), isTrue);
+      expect(_busyOn(tester, 'Two', others: ['One', 'Three']), isFalse, reason: 'the other rows stay');
+
+      host.nodeGates['sub1::n1']!.complete(true);
+      await tester.pump(const Duration(milliseconds: 500));
     });
 
     testWidgets('the answer changes the same event in place: same id, no new event, the old check is under Earlier checks', (
@@ -308,7 +380,10 @@ void main() {
       final before = _check(0);
       host.onRecheck = (ev) {
         ev['rev'] = ((ev['rev'] as int?) ?? 0) + 1;
-        ev['data'] = {...(ev['data'] as Map<String, dynamic>), 'checks': [before]};
+        ev['data'] = {
+          ...(ev['data'] as Map<String, dynamic>),
+          'checks': [before, _nodeCheck(30, 'sub1::n2', ok: false)],
+        };
       };
       await _pump(tester, host, e['id'] as int);
       await _openSite(tester, e);
@@ -322,11 +397,38 @@ void main() {
       expect(host.journal.single['rev'], 1, reason: 'the revision grows');
 
       final lines = EventWords(_en, host.catalog).earlierChecks(EventRecord.fromJson(host.journal.single));
-      expect(lines, isNotEmpty);
+      expect(lines, hasLength(2));
+      expect(lines.where((l) => l.endsWith('· Two · did not open')), hasLength(1), reason: 'the node check reads by name');
       expect(_earlierHeading, findsOneWidget);
       for (final line in lines) {
         expect(find.text(line), findsOneWidget, reason: line);
       }
+    });
+  });
+
+  group('per-row busy with two nodes (docs/connect-model.md «Check again»)', () {
+    testWidgets('two rows of one site run at once; each is busy on its own row only', (tester) async {
+      final host = _RecheckHost()
+        ..setPhase(ConnectionPhase.connected)
+        ..nodeGates['sub1::n2'] = Completer<bool>()
+        ..nodeGates['sub1::n3'] = Completer<bool>();
+      _catalog(host);
+      final e = _ev(host, 'site', 'unreachable', data: _unreachable(tried: const ['sub1::n2', 'sub1::n3']));
+      await _pump(tester, host, e['id'] as int);
+      await _openSite(tester, e);
+
+      await tester.tap(find.textContaining('Two').first);
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(find.textContaining('Three').first);
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(host.nodeRechecks.map((c) => c.node), ['sub1::n2', 'sub1::n3']);
+      expect(_busyOn(tester, 'Two', others: ['Three', 'One']), isTrue);
+      expect(_busyOn(tester, 'Three', others: ['Two', 'One']), isTrue);
+      expect(_busyOn(tester, 'One', others: ['Two', 'Three']), isFalse, reason: 'the own route is not asked');
+
+      host.nodeGates['sub1::n2']!.complete(true);
+      host.nodeGates['sub1::n3']!.complete(true);
+      await tester.pump(const Duration(milliseconds: 500));
     });
   });
 

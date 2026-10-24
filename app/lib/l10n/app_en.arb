@@ -4829,5 +4829,7 @@
       }
     }
   },
-  "checked2": "Checked"
+  "checked2": "Checked",
+  "opened": "opened",
+  "didNotOpen": "did not open"
 }

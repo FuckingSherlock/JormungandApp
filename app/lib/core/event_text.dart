@@ -406,7 +406,9 @@ class EventWords {
       final at = c['at'];
       final time = at is num ? clock(at.toInt()) : '';
       final String what;
-      if (c['kind'] == 'unreachable') {
+      if (c['kind'] == 'node') {
+        what = _lines([server(c['server']), c['ok'] == true ? l10n.opened : l10n.didNotOpen]);
+      } else if (c['kind'] == 'unreachable') {
         what = l10n.didNotOpenThroughAnyServer;
       } else {
         final from = _routeName(c['entry'] ?? e.data['entry'], c['server']);

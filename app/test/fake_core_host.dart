@@ -596,6 +596,17 @@ class FakeCoreHost extends CoreHost {
     return recheckResult;
   }
 
+  /// Per-row «Check again» presses (one node of a site event), in order, and what the core answers to them.
+  final List<({int eventId, String node})> nodeRechecks = [];
+  bool nodeRecheckResult = true;
+
+  @override
+  Future<bool> recheckSiteNode(int eventId, String node) async {
+    nodeRechecks.add((eventId: eventId, node: node));
+    calls.add('recheckSiteNode $eventId $node');
+    return nodeRecheckResult;
+  }
+
   @override
   Future<void> retryRuleSets(int eventId) async {
     retriedRuleSets.add(eventId);

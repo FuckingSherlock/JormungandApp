@@ -278,8 +278,22 @@ String? eventOpenTarget(EventRecord e, CoreHost host) {
   return null;
 }
 
-/// The events whose "Check again" (a retry of a Checked row) is running now.
-final ValueNotifier<Set<int>> _rechecking = ValueNotifier<Set<int>>(const {});
+/// Per event, the rows of its site card (node keys, 'checker') whose recheck is running now.
+final ValueNotifier<Map<int, Set<String>>> _rechecking = ValueNotifier<Map<int, Set<String>>>(const {});
+
+/// One recheck of a row: a press while that row runs does nothing; other rows run in parallel.
+Future<void> _runRow(int id, String key, Future<Object?> Function() run) async {
+  if (_rechecking.value[id]?.contains(key) ?? false) return;
+  _rechecking.value = {..._rechecking.value, id: {...?_rechecking.value[id], key}};
+  try {
+    await run();
+  } finally {
+    final rest = {...?_rechecking.value[id]}..remove(key);
+    final m = {..._rechecking.value};
+    rest.isEmpty ? m.remove(id) : m[id] = rest;
+    _rechecking.value = m;
+  }
+}
 
 /// One row of the journal.
 class EventRow extends StatelessWidget {
@@ -644,6 +658,8 @@ class EventRow extends StatelessWidget {
       }
     }
 
+    // rebuilt on the busy notifier too: the rows of a site card show their own recheck progress
+    EventCardModel? makeModel() {
     EventCardModel? model;
     if (e.cat == 'dns') {
       model = dnsCard(e, dnsCtx);
@@ -711,17 +727,9 @@ class EventRow extends StatelessWidget {
           },
           onCreateRule: () => links.newRuleFor?.call(host: siteHost, via: viaT),
           onGoNode: goNode,
-          onRecheckNode: (_) async {
-            // one check at a time per event: a press while it runs does nothing
-            if (_rechecking.value.contains(e.id)) return;
-            _rechecking.value = {..._rechecking.value, e.id};
-            try {
-              await host.recheckSite(e.id);
-            } finally {
-              _rechecking.value = {..._rechecking.value}..remove(e.id);
-            }
-          },
-          onRecheckChecker: () => host.checkSite(e.id),
+          onRecheckNode: (key) => _runRow(e.id, key, () => host.recheckSiteNode(e.id, key)),
+          onRecheckChecker: () => _runRow(e.id, 'checker', () => host.checkSite(e.id)),
+          busy: (key) => _rechecking.value[e.id]?.contains(key) ?? false,
         ),
       );
     }
@@ -741,6 +749,10 @@ class EventRow extends StatelessWidget {
         actions: m.actions,
       );
     }
+    return model;
+    }
+
+    final firstModel = makeModel();
 
     late final Widget Function(Iterable<(String, VoidCallback?)> more, {bool card}) detailsPanel; // set below the row
     Widget buildBody() => Column(
@@ -966,7 +978,7 @@ class EventRow extends StatelessWidget {
           );
 
     // the generic card, when the event has the data for it (older records fall through to the row below)
-    if (model != null) {
+    if (firstModel != null) {
       return HitFlash(
         token: hit,
         child: Material(
@@ -974,18 +986,10 @@ class EventRow extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // a retry of a Checked row shows its progress over the card; a tap on the card opens the event
-              ValueListenableBuilder<Set<int>>(
+              // only the card's Details button opens the event; the rows show their own recheck progress
+              ValueListenableBuilder<Map<int, Set<String>>>(
                 valueListenable: _rechecking,
-                builder: (_, busy, _) => busy.contains(e.id)
-                    ? const LinearProgressIndicator(key: ValueKey('evRecheckBusy'), minHeight: 2)
-                    : const SizedBox.shrink(),
-              ),
-              InkWell(
-                onTap: () => logs.toggleRow(g.key),
-                splashFactory: NoSplash.splashFactory,
-                highlightColor: Colors.transparent,
-                child: EventCard(model: model),
+                builder: (_, _, _) => EventCard(model: makeModel() ?? firstModel),
               ),
               if (open) Padding(padding: const EdgeInsets.fromLTRB(14, 0, 14, 12), child: detailsPanel(const [], card: true)),
             ],

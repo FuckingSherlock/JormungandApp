@@ -540,5 +540,7 @@
   "no own route": null,
   "{0} rule": null,
   "Create {0} rule": null,
-  "Checked": null
+  "Checked": null,
+  "opened": null,
+  "did not open": null
 }

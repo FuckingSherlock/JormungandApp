@@ -366,7 +366,7 @@ void main() {
       });
     }
 
-    testWidgets('a Checked node row retries through the core for its site', (tester) async {
+    testWidgets('a Checked node row retries through the core for its own node', (tester) async {
       final host = FakeCoreHost();
       _catalog(host);
       final e = host.addEvent('site', 'unreachable', level: 'warn', at: _at(0), data: _unreachable());
@@ -375,7 +375,7 @@ void main() {
 
       await tester.tap(find.textContaining('Two').first);
       await tester.pump();
-      expect(host.recheckCalls, [e['id']]);
+      expect(host.nodeRechecks.map((c) => (c.eventId, c.node)), [(e['id'] as int, 'sub1::n2')]);
     });
 
     testWidgets('the checker row of a site with a check asks the checker for this event', (tester) async {

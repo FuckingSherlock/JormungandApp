@@ -30,6 +30,7 @@ class SiteCardCtx {
     required this.onGoNode,
     required this.onRecheckNode,
     required this.onRecheckChecker,
+    required this.busy,
   });
 
   final AppLocalizations l;
@@ -65,6 +66,9 @@ class SiteCardCtx {
   final void Function(String nodeKey) onGoNode;
   final void Function(String nodeKey) onRecheckNode;
   final VoidCallback onRecheckChecker;
+
+  /// Whether the recheck of a row is running (row keys: a node key, 'checker').
+  final bool Function(String rowKey) busy;
 }
 
 // The checker's name: the host of the core's checker (`SiteChecker.base`); the event's `check` never carries one.
@@ -91,20 +95,38 @@ EventCardModel? siteCard(EventRecord e, SiteCardCtx ctx) {
   // down everywhere: the site is down, our routes are no part of it
   final routes = blocked || !w.downEverywhere(d);
   final own = _hop(d['entry'] ?? d['route'], d['server']);
-  final tried = [
-    if (d['tried'] is List)
-      for (final x in d['tried'] as List)
-        if (x is Map) _hop(x['entry'], x['server']),
-  ];
-  final via = blocked ? _hop(d['via'], d['viaServer']) : const _Hop('', '');
-  final failed = routes ? [if (!own.isEmpty) own, ...tried.where((x) => !x.isEmpty)] : const <_Hop>[];
-  final opened = blocked && !via.isEmpty;
-  final total = failed.length + (opened ? 1 : 0);
+  // the checked nodes: `nodes` (after rechecks), else the old `tried` (red) + `via` (green)
+  final nodes = <({_Hop hop, bool ok, int? ms})>[];
+  if (d['nodes'] is List) {
+    for (final x in d['nodes'] as List) {
+      if (x is! Map) continue;
+      final h = _hop(x['entry'], x['server']);
+      if (h.isEmpty) continue;
+      nodes.add((hop: h, ok: x['ok'] == true, ms: x['ms'] is num ? (x['ms'] as num).toInt() : null));
+    }
+  } else {
+    if (d['tried'] is List) {
+      for (final x in d['tried'] as List) {
+        if (x is Map && !_hop(x['entry'], x['server']).isEmpty) {
+          nodes.add((hop: _hop(x['entry'], x['server']), ok: false, ms: null));
+        }
+      }
+    }
+    final v = blocked ? _hop(d['via'], d['viaServer']) : const _Hop('', '');
+    if (!v.isEmpty) nodes.add((hop: v, ok: true, ms: null));
+  }
+  final shown = nodes.where((n) => n.ok || routes).toList();
+  final via = shown.where((n) => n.ok).firstOrNull?.hop ?? const _Hop('', '');
+  final redNodes = shown.where((n) => !n.ok).length;
+  final ownN = routes && !own.isEmpty ? 1 : 0;
+  final opened = shown.any((n) => n.ok);
+  final failedCount = ownN + redNodes;
+  final total = ownN + shown.length;
 
   final title = total == 0
       ? l.doesNotOpen(host)
-      : blocked
-      ? l.didNotOpenOnOfServers(host, failed.length, total)
+      : opened
+      ? l.didNotOpenOnOfServers(host, failedCount, total)
       : l.didNotOpenOnServersPlural(total, host);
 
   String nodeName(_Hop h) => h.server.isNotEmpty ? ctx.nodeLabel(_key(h.server)) : w.entry(h.entry);
@@ -130,7 +152,7 @@ EventCardModel? siteCard(EventRecord e, SiteCardCtx ctx) {
     final hasOwn = a != null && a.halves.any((h) => h.$2.act != 'default');
     final why = w.whyRows(d);
     final appRow = why.where((x) => x.key == l.app).firstOrNull;
-    final fb = blocked && opened ? nodeName(via) : '';
+    final fb = opened ? nodeName(via) : '';
     VoidCallback? openApp() => pkg.isEmpty ? null : ctx.onOpenApp;
     rows.add(
       KeyRow(
@@ -179,7 +201,7 @@ EventCardModel? siteCard(EventRecord e, SiteCardCtx ctx) {
     if (r != null) {
       rows.add(KeyRow(name: l.rule, value: l.rule6(host), sub: '${r.route}: ${r.target}', onTap: () => ctx.onOpenRule(r.id)));
     } else if (!reopened) {
-      final fb = blocked && opened ? nodeName(via) : '';
+      final fb = opened ? nodeName(via) : '';
       rows.add(
         KeyRow(
           name: l.rule,
@@ -192,38 +214,39 @@ EventCardModel? siteCard(EventRecord e, SiteCardCtx ctx) {
     }
   }
 
-  // Route: the one the failed connection went through
+  // the route the failed connection went through: a red row, above the Checked section
   if (routes && !own.isEmpty) {
     final (v, s) = routeText(own);
-    rows.add(KeyRow(name: l.route, value: v, sub: s, marquee: true, onGo: go(own)));
-  }
-
-  // Checked: only the additional checks
-  final checks = <BoxRow>[];
-  for (final h in tried) {
-    if (h.isEmpty || !routes) continue;
-    final (v, s) = routeText(h);
-    checks.add(
+    final k = own.server.isEmpty ? null : _key(own.server);
+    rows.add(
       CheckRow(
         ok: false,
         value: v,
         sub: s,
         marquee: true,
-        onRetry: h.server.isEmpty ? null : () => ctx.onRecheckNode(_key(h.server)),
-        onGo: go(h),
+        onRetry: k == null ? null : () => ctx.onRecheckNode(k),
+        onGo: go(own),
+        busy: k != null && ctx.busy(k),
       ),
     );
   }
-  if (opened) {
-    final (v, s) = routeText(via);
+
+  // Checked: only the additional checks
+  final checks = <BoxRow>[];
+  for (final n in shown) {
+    final h = n.hop;
+    final (v, s) = routeText(h);
+    final k = h.server.isEmpty ? null : _key(h.server);
+    final ms = n.ok && n.ms != null ? l.opensInMs(n.ms!) : null;
     checks.add(
       CheckRow(
-        ok: true,
+        ok: n.ok,
         value: v,
-        sub: s,
+        sub: ms == null ? s : s == null ? ms : '$s · $ms',
         marquee: true,
-        onRetry: via.server.isEmpty ? null : () => ctx.onRecheckNode(_key(via.server)),
-        onGo: go(via),
+        onRetry: k == null ? null : () => ctx.onRecheckNode(k),
+        onGo: go(h),
+        busy: k != null && ctx.busy(k),
       ),
     );
   }
@@ -233,7 +256,7 @@ EventCardModel? siteCard(EventRecord e, SiteCardCtx ctx) {
 
   // Cause
   (String, String)? cause;
-  if (blocked) {
+  if (blocked || opened) {
     cause = (own.isEmpty ? host : nodeName(own), l.theSiteOpensThroughAnotherServer);
   } else {
     final verdict = w.checkText(d);
@@ -241,7 +264,7 @@ EventCardModel? siteCard(EventRecord e, SiteCardCtx ctx) {
       verdict ??
           (!routes
               ? l.causeNotEstablishedSeeTheChecks
-              : tried.isEmpty
+              : redNodes == 0
               ? (d['retries'] == 'off' ? l.retriesThroughOtherRoutesAreOff : l.noOtherWorkingRouteToTry)
               : l.causeNotEstablishedSeeTheChecks),
       '',
@@ -268,9 +291,27 @@ EventCardModel? siteCard(EventRecord e, SiteCardCtx ctx) {
 /// `service · kind` with the outcome under it; null when the checker has not said anything (off / asking).
 CheckRow? _checkerRow(Object? c, SiteCardCtx ctx) {
   if (c is! Map) return null;
+  final l = ctx.l;
+  var busy = ctx.busy('checker');
+  if (c['state'] == 'pending') {
+    // the previous outcome stays drawn while the checker runs again
+    final prev = c['prev'];
+    if (prev is! Map) {
+      final kind = '${c['kind'] ?? 'http'}'.toUpperCase();
+      return CheckRow(
+        ok: null,
+        value: '$_checkerService · $kind',
+        sub: l.checking,
+        busy: true,
+        onRetry: ctx.onRecheckChecker,
+        onGo: null,
+      );
+    }
+    c = prev;
+    busy = true;
+  }
   final state = c['state'];
   if (state != 'opens' && state != 'down' && state != 'failed') return null;
-  final l = ctx.l;
   final kind = '${c['kind'] ?? 'http'}'.toUpperCase();
   final route = c['via'] == 'tunnel' ? l.viaTunnel : c['via'] == 'direct' ? l.direct4 : null;
   final String outcome;
@@ -287,5 +328,6 @@ CheckRow? _checkerRow(Object? c, SiteCardCtx ctx) {
     sub: route == null ? outcome : '$outcome · $route',
     onRetry: ctx.onRecheckChecker,
     onGo: null,
+    busy: busy,
   );
 }

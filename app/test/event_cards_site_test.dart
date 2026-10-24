@@ -4,6 +4,11 @@
 // «opens in»), the checker row by its result. The Rule row: an existing rule («<host> rule», «<route>: <target>») or
 // «Create <host> rule» (Fallback = the opening node, blocked only). Buttons: Details first, then Ignore site, no
 // Check again. Old events without the new fields still give a card.
+// Per-row recheck (app-site-wire): data.nodes drives the Checked rows and the counts (own + nodes; K = own + red); a
+// green node makes the title «K of N», the Cause line «<own> — the site opens through another server» and the new
+// Rule row «Fallback: <first green node>» (any type); no green: the unreachable wording and no Fallback. The route row
+// is a CheckRow above the Checked section (retry = own key, go). Busy comes from ctx.busy(key). The checker row is
+// busy while pending (drawn from prev when it has one). earlierChecks reads kind node lines by name.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -120,6 +125,9 @@ Map<String, dynamic> _checker(String state) => {
 class _Calls {
   final List<String> log = [];
 
+  /// The row keys (a node key, the own key, or 'checker') that are busy now.
+  final Set<String> busyKeys = {};
+
   SiteCardCtx ctx({int repeats = 1, bool background = false, ({String id, String route, String target})? rule}) =>
       SiteCardCtx(
         l: _en,
@@ -138,6 +146,7 @@ class _Calls {
         onGoNode: (k) => log.add('go:$k'),
         onRecheckNode: (k) => log.add('recheck:$k'),
         onRecheckChecker: () => log.add('checker'),
+        busy: (k) => busyKeys.contains(k),
       );
 }
 
@@ -148,6 +157,19 @@ List<KeyRow> _keys(EventCardModel m) =>
 
 List<CheckRow> _checks(EventCardModel m) =>
     m.blocks.whereType<DataBox>().expand((b) => b.rows).whereType<CheckRow>().toList();
+
+/// The rows under the «Checked» section (the route row above that section is not one of them).
+List<CheckRow> _checkedRows(EventCardModel m) {
+  final rows = m.blocks.whereType<DataBox>().expand((b) => b.rows).toList();
+  final i = rows.indexWhere((r) => r is CardSection && r.title == 'Checked');
+  return i < 0 ? const [] : rows.sublist(i + 1).whereType<CheckRow>().toList();
+}
+
+/// The words of a check row: its value and its sub line.
+String _text(CheckRow r) => '${r.value} ${r.sub ?? ''}';
+
+/// The own route row (sub «└ One»; its value «Alpha · vless» is shared with another vless node of the source).
+CheckRow _route(EventCardModel m) => _checks(m).singleWhere((r) => r.sub == '└ One');
 
 KeyRow _keyRow(EventCardModel m, String value) => _keys(m).singleWhere((r) => r.value == value);
 
@@ -209,7 +231,7 @@ void main() {
         final m = _card(type, _data(type, tried: _tried), c.ctx());
         expect(m.blocks.whereType<DataBox>().expand((b) => b.rows).whereType<CardSection>().map((s) => s.title),
             contains('Checked'));
-        expect(_checks(m).any((r) => r.value.contains('One') || (r.sub ?? '').contains('One')), isFalse);
+        expect(_checkedRows(m).any((r) => _text(r).contains('One')), isFalse, reason: 'the own route is not a checked row');
 
         final two = _check(m, 'Two');
         expect(two.ok, isFalse);
@@ -233,7 +255,7 @@ void main() {
 
     test('unreachable without a checker: no ok row at all', () {
       final m = _card('unreachable', _data('unreachable', tried: _tried), _Calls().ctx());
-      expect(_checks(m).where((r) => r.ok), isEmpty);
+      expect(_checks(m).where((r) => r.ok == true), isEmpty);
     });
 
     for (final s in [('opens', true), ('down', false), ('failed', false)]) {
@@ -284,13 +306,23 @@ void main() {
 
   group('Route row', () {
     for (final type in ['unreachable', 'blocked']) {
-      test('$type: the own route «<sub> · <proto>», sub «└ <node>», go opens Routes at the node', () {
+      test('$type: the own route is a bad CheckRow «<sub> · <proto>», sub «└ <node>», above the Checked section, no Route label', () {
+        final m = _card(type, _data(type, tried: _tried), _Calls().ctx());
+        final rows = m.blocks.whereType<DataBox>().expand((b) => b.rows).toList();
+        final route = _route(m);
+        expect(route.sub, '└ One');
+        expect(route.ok, isFalse);
+        expect(route.marquee, isTrue);
+        expect(rows.indexOf(route), lessThan(rows.indexWhere((r) => r is CardSection && r.title == 'Checked')));
+        expect(_keys(m).where((r) => r.name == 'Route'), isEmpty);
+      });
+
+      test('$type: the own route retries the own node (its key), go opens Routes at the node', () {
         final c = _Calls();
-        final m = _card(type, _data(type), c.ctx());
-        final row = _keyRow(m, 'Alpha · vless');
-        expect(row.sub, '└ One');
-        row.onGo!();
-        expect(c.log, ['go:src1::n1']);
+        final route = _route(_card(type, _data(type), c.ctx()));
+        route.onRetry!();
+        route.onGo!();
+        expect(c.log, ['recheck:src1::n1', 'go:src1::n1']);
       });
     }
   });
@@ -305,6 +337,154 @@ void main() {
 
     test('unreachable: there is a cause line', () {
       expect(_card('unreachable', _data('unreachable'), _Calls().ctx()).cause, isNotNull);
+    });
+  });
+
+  group('data.nodes drives the rows, the counts and the Fallback (app-site-wire)', () {
+    // three checked nodes: one bad, two that opened (the first one with its time)
+    final nodes = [
+      {'entry': 'src1', 'server': 'src1::n3', 'ok': false},
+      {'entry': 'src1', 'server': 'src1::n2', 'ok': true, 'ms': 120},
+      {'entry': 'src2', 'server': 'src2::m1', 'ok': true},
+    ];
+
+    /// The base data of [type] with [nodes] in place of the legacy tried/via fields.
+    Map<String, dynamic> withNodes(String type, List<Map<String, dynamic>> items) => {
+      ...(type == 'blocked' ? _blocked(via: false) : _unreachable()),
+      'nodes': items,
+    };
+
+    test('one Checked row per item in its order, colour by ok, «opens in N ms» only when ok with ms', () {
+      final m = _card('unreachable', withNodes('unreachable', nodes), _Calls().ctx());
+      final rows = _checkedRows(m);
+      expect(rows.map((r) => r.ok), [false, true, true]);
+      expect(_text(rows[0]), contains('Three'));
+      expect(_text(rows[1]), contains('Two'));
+      expect(_text(rows[1]), contains('opens in 120 ms'), reason: 'the opensInMs string');
+      expect(_text(rows[2]), contains('Remote'));
+      expect(rows[2].sub ?? '', isNot(contains('opens in')));
+    });
+
+    test('data.nodes replaces the legacy tried/via: only its items are rows', () {
+      final m = _card(
+        'unreachable',
+        {..._unreachable(tried: _tried), 'nodes': [{'entry': 'src2', 'server': 'src2::m1', 'ok': true}]},
+        _Calls().ctx(),
+      );
+      final rows = _checkedRows(m);
+      expect(rows, hasLength(1));
+      expect(rows.single.ok, isTrue);
+      expect(_text(rows.single), contains('Remote'));
+    });
+
+    for (final type in ['unreachable', 'blocked']) {
+      test('$type with a green node: the title is «did not open on K of N servers», K = own + the red ones, N = own + the items', () {
+        expect(_card(type, withNodes(type, nodes), _Calls().ctx()).title, 'shop.example did not open on 2 of 4 servers');
+      });
+
+      test('$type with no green node: «did not open on N servers», N = own + the items', () {
+        final red = [
+          {'entry': 'src1', 'server': 'src1::n3', 'ok': false},
+          {'entry': 'src1', 'server': 'src1::n2', 'ok': false},
+        ];
+        expect(_card(type, withNodes(type, red), _Calls().ctx()).title, 'shop.example did not open on 3 servers');
+      });
+
+      test('$type with a green node: the Rule row says «Fallback: <first green node>»', () {
+        final m = _card(type, withNodes(type, nodes), _Calls().ctx());
+        final row = _keyRow(m, 'Create shop.example rule');
+        expect(row.sub, startsWith('Fallback: '));
+        expect(row.sub, contains('Two'), reason: 'the first green node, not the last one');
+        expect(row.sub, isNot(contains('Remote')));
+      });
+
+      test('$type with a green node: the Cause is «<own node> — the site opens through another server»', () {
+        final m = _card(type, withNodes(type, nodes), _Calls().ctx());
+        expect(m.cause!.$1, contains('One'));
+        expect(m.cause!.$2, 'the site opens through another server');
+      });
+    }
+
+    test('unreachable with no green node: no Fallback, the unreachable cause', () {
+      final red = [
+        {'entry': 'src1', 'server': 'src1::n3', 'ok': false},
+      ];
+      final m = _card('unreachable', withNodes('unreachable', red), _Calls().ctx());
+      expect(_keyRow(m, 'Create shop.example rule').sub, isNull);
+      expect(m.cause, isNotNull);
+      expect(m.cause!.$2, isNot('the site opens through another server'));
+    });
+
+    test('no own route (no entry, no server): N counts the items only', () {
+      final data = {
+        'host': _host,
+        'nodes': [
+          {'entry': 'src1', 'server': 'src1::n3', 'ok': false},
+        ],
+      };
+      expect(_card('unreachable', data, _Calls().ctx()).title, 'shop.example did not open on 1 server');
+    });
+
+    test('unreachable, the checker says down everywhere: no route and no node rows, the title says «does not open»', () {
+      final data = {..._unreachable(tried: _tried), 'check': _checker('down')};
+      final m = _card('unreachable', data, _Calls().ctx());
+      expect(m.title, contains('does not open'));
+      expect(m.title, isNot(contains('server')));
+      expect(_checks(m).where((r) => (r.sub ?? '').contains('└')), isEmpty);
+      expect(_keys(m).where((r) => (r.sub ?? '').contains('└')), isEmpty);
+      expect(_checks(m).where((r) => r.value.contains('Alpha')), isEmpty);
+    });
+  });
+
+  group('busy and the checker while pending (app-site-wire)', () {
+    test('a node row, the own route row and the checker row take busy from ctx.busy(key)', () {
+      final c = _Calls()..busyKeys.addAll(['src1::n2', 'src1::n1', 'checker']);
+      final m = _card('unreachable', {..._unreachable(tried: _tried), 'check': _checker('opens')}, c.ctx());
+      expect(_check(m, 'Two').busy, isTrue);
+      expect(_check(m, 'Three').busy, isFalse);
+      expect(_route(m).busy, isTrue);
+      expect(_check(m, 'check-host.net').busy, isTrue);
+    });
+
+    test('no busy key: no row is busy', () {
+      final m = _card('unreachable', {..._unreachable(tried: _tried), 'check': _checker('opens')}, _Calls().ctx());
+      expect(_checks(m).where((r) => r.busy), isEmpty);
+    });
+
+    for (final s in [('opens', true), ('failed', false)]) {
+      test('checker pending with prev ${s.$1}: the previous outcome (ok ${s.$2}), busy', () {
+        final data = _data(
+          'unreachable',
+          check: {'state': 'pending', 'at': _t0, 'manual': true, 'prev': _checker(s.$1)},
+        );
+        final row = _check(_card('unreachable', data, _Calls().ctx()), 'check-host.net');
+        expect(row.ok, s.$2);
+        expect(row.busy, isTrue);
+      });
+    }
+
+    test('checker pending without prev: no outcome yet, ok null, sub «checking…», busy', () {
+      final data = _data('unreachable', check: {'state': 'pending', 'at': _t0, 'manual': true});
+      final row = _check(_card('unreachable', data, _Calls().ctx()), 'check-host.net');
+      expect(row.ok, isNull);
+      expect(row.sub, _en.checking);
+      expect(row.busy, isTrue);
+    });
+  });
+
+  group('earlierChecks with node checks (app-site-wire)', () {
+    test('a node check reads «HH:MM · <node> · opened» or «HH:MM · <node> · did not open»', () {
+      final e = _ev('blocked', {
+        ..._blocked(via: false),
+        'checks': [
+          {'at': _t0, 'kind': 'node', 'server': 'src1::n2', 'ok': true},
+          {'at': _t0 + 60000, 'kind': 'node', 'server': 'src1::n3', 'ok': false},
+        ],
+      });
+      final lines = _words.earlierChecks(e);
+      expect(lines, hasLength(2));
+      expect(lines.where(RegExp(r'^\d{2}:\d{2} · Two · opened$').hasMatch), hasLength(1));
+      expect(lines.where(RegExp(r'^\d{2}:\d{2} · Three · did not open$').hasMatch), hasLength(1));
     });
   });
 
@@ -333,7 +513,7 @@ void main() {
         final m = _card(type, {'host': _host}, _Calls().ctx());
         expect(m.title, contains(_host));
         expect(_checks(m), isEmpty); // no tried, no checker, no via
-        expect(_keys(m).any((r) => (r.sub ?? '').contains('└')), isFalse); // no route row
+        expect(_checks(m).any((r) => (r.sub ?? '').contains('└')), isFalse); // no route row
       });
     }
   });

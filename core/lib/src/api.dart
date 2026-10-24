@@ -170,6 +170,14 @@ abstract interface class CoreApi {
   /// event gone, not a site event). A second call for the event while one runs joins it.
   Future<Map<String, dynamic>> recheckSite(int eventId);
 
+  /// A tap on a row of the site card: the site is probed through THAT node only ([node]: a key `sid::nid` or a raw tag),
+  /// the result is merged into the same event in place (`data.nodes`, and the legacy `tried` / `via` / `viaServer` /
+  /// `viaTarget` / `type` derived from it; `data.checks` gets a `kind: 'node'` entry). The event's own node opening
+  /// closes it as in [recheckSite]. -> `{ok: true, result: 'opens'|'fails', ms?}`, or `{ok: false, reason}`: notConnected,
+  /// gone, notSiteEvent, noServer, cannotProbe, failed (nothing is written then). A second call for the same event and
+  /// node while one runs joins it; other nodes of the event run in parallel.
+  Future<Map<String, dynamic>> recheckSiteNode(int eventId, String node);
+
   /// `{auto: bool}`: Settings → DNS → Switch automatically, live.
   Future<Map<String, dynamic>> dnsAutoSetting(Map<String, dynamic> body);
 

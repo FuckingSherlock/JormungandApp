@@ -1098,6 +1098,16 @@ class LiveCoreHost extends CoreHost {
   }
 
   @override
+  Future<bool> recheckSiteNode(int eventId, String node) async {
+    try {
+      final r = await api.recheckSiteNode(eventId, node);
+      return r['ok'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
   Future<bool> recheckSite(int eventId) async {
     try {
       // {ok: true, result} or {ok: false, reason}: the core says so itself, it does not throw for it

@@ -139,6 +139,7 @@ class Daemon {
         'POST /api/auto' => service.autoSettings(body),
         'POST /api/plan/order' => service.applyOrder(body),
         'POST /api/sites/recheck' => service.recheckSite(body['id'] is int ? body['id'] as int : _eventId(body)),
+        'POST /api/sites/recheck-node' => service.recheckSiteNode(body['id'] is int ? body['id'] as int : _eventId(body), '${body['node'] ?? ''}'),
         'POST /api/dns/auto' => service.dnsAutoSetting(body),
         'POST /api/dns/ping' => service.pingDnsSides(body),
         'POST /api/exit' => service.recheckExit(),

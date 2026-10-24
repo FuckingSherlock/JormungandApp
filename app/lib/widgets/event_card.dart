@@ -68,8 +68,13 @@ class CardSection extends BoxRow {
 
 /// A check row: the background by the result, a retry on the left, a jump after a separator on the right.
 class CheckRow extends BoxRow {
-  const CheckRow({required this.ok, required this.value, this.sub, this.marquee = false, this.onRetry, this.onGo});
-  final bool ok;
+  const CheckRow({required this.ok, required this.value, this.sub, this.marquee = false, this.busy = false, this.onRetry, this.onGo});
+
+  /// The verdict; null = no verdict yet (a plain row).
+  final bool? ok;
+
+  /// A recheck is running: the verdict fades out, the row pulses yellow, the retry icon spins, taps do nothing.
+  final bool busy;
 
   /// The value is a node: a name that does not fit runs as a marquee.
   final bool marquee;
@@ -143,6 +148,7 @@ class CardTones {
   const CardTones._();
   static const Color bad = Color.fromRGBO(110, 38, 40, 1);
   static const Color good = Color.fromRGBO(28, 92, 48, 1);
+  static const Color checking = Color.fromRGBO(120, 96, 24, 1);
 
   /// `linear-gradient(270deg, c, c .35 at 55%, c .12)`: strong on the right, fading to the left.
   static LinearGradient gradient(Color c) => LinearGradient(
@@ -569,9 +575,14 @@ class _KeyRowView extends StatelessWidget {
             if (row.leading != null) ...[row.leading!, const SizedBox(width: 8)],
             if (row.icon != null) ...[Icon(row.icon, size: 18, color: c.t2), const SizedBox(width: 8)],
             Expanded(child: _ValueText(value: row.value, sub: row.sub, marquee: row.marquee)),
+            // the mark takes only its own width (capped), so the value gets the rest and the chevron / go icon sits
+            // at the row's right edge on every row
             if (row.mark != null) ...[
               const SizedBox(width: 6),
-              Flexible(child: Text(row.mark!, textAlign: TextAlign.end, style: TextStyle(fontSize: 11.5, color: c.t3))),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * .3),
+                child: Text(row.mark!, textAlign: TextAlign.end, style: TextStyle(fontSize: 11.5, color: c.t3)),
+              ),
             ],
             if (row.onGo != null)
               InkWell(
@@ -588,20 +599,107 @@ class _KeyRowView extends StatelessWidget {
   }
 }
 
-class _CheckRowView extends StatelessWidget {
+class _CheckRowView extends StatefulWidget {
   const _CheckRowView({required this.row});
   final CheckRow row;
 
   @override
+  State<_CheckRowView> createState() => _CheckRowViewState();
+}
+
+class _CheckRowViewState extends State<_CheckRowView> with TickerProviderStateMixin {
+  // verdict gradient opacity: 1 = shown, fades out when a recheck starts, back in with the new verdict
+  late final AnimationController _verdict = AnimationController(vsync: this, duration: const Duration(milliseconds: 250), value: 1);
+  // the yellow pulse: 0..1 over .6 s, reversed back = 1.2 s per full cycle
+  late final AnimationController _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
+  late final AnimationController _spin = AnimationController(vsync: this, duration: const Duration(seconds: 1));
+  bool _pulsing = false;
+  bool? _shownOk;
+
+  @override
+  void initState() {
+    super.initState();
+    _shownOk = widget.row.ok;
+    _verdict.addStatusListener((s) {
+      if (s == AnimationStatus.dismissed && mounted && widget.row.busy) _startPulse();
+    });
+    if (widget.row.busy) {
+      _verdict.value = 0;
+      _pulsing = true;
+      _pulse.repeat(reverse: true);
+      _spin.repeat();
+    }
+  }
+
+  void _startPulse() {
+    _pulsing = true;
+    _pulse.repeat(reverse: true);
+    _spin.repeat();
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didUpdateWidget(_CheckRowView old) {
+    super.didUpdateWidget(old);
+    final busy = widget.row.busy;
+    if (busy && !old.row.busy) {
+      _spin.repeat();
+      _verdict.reverse();
+    } else if (!busy && old.row.busy) {
+      _pulsing = false;
+      _pulse.stop();
+      _spin.stop();
+      _shownOk = widget.row.ok;
+      _verdict.forward();
+    } else if (!busy) {
+      _shownOk = widget.row.ok;
+    }
+  }
+
+  @override
+  void dispose() {
+    _verdict.dispose();
+    _pulse.dispose();
+    _spin.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final c = _pal(context);
+    final row = widget.row;
+    final busy = row.busy;
     // a tap anywhere on the row retries (the refresh icon is only the hint); the jump after the separator is its own tap
-    final retry = row.onRetry;
+    final retry = busy ? null : row.onRetry;
+    final ok = _shownOk;
+    Widget icon = Icon(LucideIcons.refreshCw, size: 18, color: c.accent);
+    if (busy) icon = RotationTransition(key: const ValueKey('eventCard.busy'), turns: _spin, child: icon);
     // no IntrinsicHeight: the marquee lays out by its constraints; the jump is stretched to the row's height by the Stack
-    return DecoratedBox(
-      decoration: BoxDecoration(gradient: CardTones.gradient(row.ok ? CardTones.good : CardTones.bad)),
-      child: Stack(
-        children: [
+    return Stack(
+      children: [
+        if (ok != null)
+          Positioned.fill(
+            child: FadeTransition(
+              opacity: _verdict,
+              child: DecoratedBox(decoration: BoxDecoration(gradient: CardTones.gradient(ok ? CardTones.good : CardTones.bad))),
+            ),
+          ),
+        if (_pulsing && busy)
+          Positioned.fill(
+            child: AnimatedBuilder(
+              animation: _pulse,
+              builder: (_, child) => Opacity(opacity: .35 + .65 * Curves.easeInOut.transform(_pulse.value), child: child),
+              child: DecoratedBox(decoration: BoxDecoration(gradient: CardTones.gradient(CardTones.checking))),
+            ),
+          ),
+        _content(c, row, retry, icon, busy),
+      ],
+    );
+  }
+
+  Widget _content(AppColors c, CheckRow row, VoidCallback? retry, Widget icon, bool busy) {
+    return Stack(
+      children: [
           InkWell(
             key: const ValueKey('eventCard.retry'),
             onTap: retry,
@@ -609,7 +707,7 @@ class _CheckRowView extends StatelessWidget {
               children: [
                 SizedBox(
                   width: 44,
-                  child: retry == null ? null : Center(child: Icon(LucideIcons.refreshCw, size: 18, color: c.accent)),
+                  child: row.onRetry == null && !busy ? null : Center(child: icon),
                 ),
                 Expanded(
                   child: Padding(
@@ -638,7 +736,6 @@ class _CheckRowView extends StatelessWidget {
               ),
             ),
         ],
-      ),
     );
   }
 }

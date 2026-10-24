@@ -39,7 +39,7 @@ void main() {
     expect(find.text('Check with checker'), findsNothing);
     expect(find.text('check-host.net · HTTP'), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('eventCard.retry')));
+    await tester.tap(find.text('check-host.net · HTTP')); // the checker row (the route row above it has its own retry)
     await tester.pump(const Duration(milliseconds: 400));
     expect(host.checkedSites, [e['id']]);
 

@@ -1382,6 +1382,135 @@ class CoreService implements CoreApi {
     return {'ok': true, 'result': result};
   }
 
+  final _nodeRechecks = <String, Future<Map<String, dynamic>>>{};
+
+  /// A row of the site card (api.dart): the site is probed through [node] only; the result is merged into the event.
+  /// One run per (event, node): a second call joins it, other nodes of the event run in parallel.
+  @override
+  Future<Map<String, dynamic>> recheckSiteNode(int eventId, String node) {
+    final key = nodeKeyOfTag(node) ?? node, run = '$eventId|$key';
+    final cur = _nodeRechecks[run];
+    if (cur != null) return cur;
+    final f = _recheckSiteNode(eventId, key).whenComplete(() {
+      _nodeRechecks.remove(run); // not returned: it is this very future
+    });
+    return _nodeRechecks[run] = f;
+  }
+
+  Future<Map<String, dynamic>> _recheckSiteNode(int id, String key) async {
+    if (!runner.running || _plan == null) return {'ok': false, 'reason': 'notConnected'};
+    final ev = eventBook.byId(id), d = ev?['data'];
+    if (ev == null || d is! Map) return {'ok': false, 'reason': 'gone'};
+    final was = '${ev['type']}';
+    if (ev['cat'] != 'site' || (was != 'blocked' && was != 'unreachable') || d['host'] is! String) return {'ok': false, 'reason': 'notSiteEvent'};
+    final host = '${d['host']}', port = (d['port'] as num?)?.toInt();
+    final dest = d['dest'] is String ? d['dest'] as String : (port == null ? host : '$host:$port');
+    final server = '${d['server'] ?? ''}', ownKey = nodeKeyOfTag(server) ?? server, isOwn = key == ownKey;
+    // the event's own node: the outbound as [_recheckSite] resolves it; another node: a working node of that key
+    final ownOut = d['outbound'] is String && '${d['outbound']}'.isNotEmpty
+        ? '${d['outbound']}'
+        : server.contains('/')
+            ? server
+            : _auto?.workingNodes().where((n) => n.server == server).map((n) => n.tag).firstOrNull;
+    final outbound = isOwn ? ownOut : _auto?.workingNodes().where((n) => n.server == key).map((n) => n.tag).firstOrNull;
+    if (outbound == null) return {'ok': false, 'reason': 'noServer'};
+    if (!_canAim(outbound, dest)) return {'ok': false, 'reason': 'cannotProbe'};
+    final entry = isOwn ? '${d['entry'] ?? _siteRoute(outbound, _routeTagOf(outbound))}' : _siteRoute(outbound, _routeTagOf(outbound));
+    final eventEntry = '${d['entry'] ?? (ownOut != null ? _siteRoute(ownOut, _routeTagOf(ownOut)) : '')}';
+    final auto = _auto, cancel = Cancel(), watch = Stopwatch()..start();
+    bool? same;
+    try {
+      same = await (probeSame ?? (o, dd, c) async => auto?.reachSame(o, dd, cancel: c))(outbound, dest, cancel);
+    } catch (e) {
+      logBook.note('warn', '$dest: checking again through $key failed: $e');
+      return {'ok': false, 'reason': 'failed'};
+    }
+    watch.stop();
+    final opens = same == true, ms = watch.elapsedMilliseconds;
+    // the event as it is now, not as it was before the probe: parallel rows keep each other's results
+    final ev2 = eventBook.byId(id), d2 = ev2?['data'];
+    if (_disposed || ev2 == null || d2 is! Map) return {'ok': false, 'reason': 'gone'};
+    if (!runner.running) return {'ok': false, 'reason': 'notConnected'};
+    final now = _nowMs, data = <String, dynamic>{...d2.cast<String, dynamic>()};
+    final checks = [
+      ...((data['checks'] as List?) ?? const []),
+      {'at': now, 'kind': 'node', 'server': key, 'ok': opens},
+    ];
+    if (checks.length > 20) checks.removeRange(0, checks.length - 20);
+    final from = '$entry ($key)';
+    final out = <String, dynamic>{'ok': true, 'result': opens ? 'opens' : 'fails', if (opens) 'ms': ms};
+    if (isOwn) {
+      if (opens) {
+        _siteMemos.removeWhere((_, m) => m.eventId == id);
+        final base = data..removeWhere((k, _) => const {'via', 'viaServer', 'viaTarget', 'tried', 'retries', 'nodes'}.contains(k));
+        eventBook.update(id,
+            level: 'info',
+            data: {...base, 'checks': checks, 'checkedAt': now, 'reopened': {'at': now, 'entry': entry, 'server': server}},
+            replaceData: true);
+        logBook.note('info', '$dest opens through $from: checked again');
+      } else {
+        eventBook.update(id, data: {'checks': checks, 'checkedAt': now});
+        logBook.note('warn', '$dest does not open through $from: checked again');
+      }
+      return out;
+    }
+    // the checked nodes besides the event's own; absent -> seeded from the legacy `tried` / `via`
+    final nodes = <Map<String, dynamic>>[];
+    if (data['nodes'] is List) {
+      for (final n in data['nodes'] as List) {
+        if (n is Map) nodes.add(n.cast<String, dynamic>());
+      }
+    } else {
+      void seed(Object? e, Object? s, bool ok) {
+        final sv = '${s ?? ''}';
+        if (sv.isEmpty || sv == ownKey || nodes.any((n) => n['server'] == sv)) return;
+        nodes.add({'entry': '${e ?? ''}', 'server': sv, 'ok': ok});
+      }
+
+      if (data['tried'] is List) {
+        for (final t in data['tried'] as List) {
+          if (t is Map) seed(t['entry'], t['server'], false);
+        }
+      }
+      seed(data['via'], data['viaServer'], true);
+    }
+    final i = nodes.indexWhere((n) => n['server'] == key);
+    final item = i < 0 ? <String, dynamic>{'entry': entry, 'server': key} : nodes[i];
+    item
+      ..['ok'] = opens
+      ..remove('ms');
+    if (opens) item['ms'] = ms;
+    item['at'] = now;
+    if (i < 0) nodes.add(item);
+    final green = nodes.where((n) => n['ok'] == true).firstOrNull;
+    final red = [for (final n in nodes) if (n['ok'] != true) {'entry': n['entry'], 'server': n['server']}];
+    final type = green != null ? 'blocked' : 'unreachable';
+    data
+      ..['nodes'] = nodes
+      ..['checks'] = checks
+      ..['checkedAt'] = now
+      ..remove('viaTarget');
+    if (red.isEmpty) {
+      data.remove('tried');
+    } else {
+      data['tried'] = red;
+    }
+    if (green != null) {
+      data['via'] = green['entry'];
+      data['viaServer'] = green['server'];
+      if ('${green['entry']}' == eventEntry) data['viaTarget'] = 'node:${green['server']}';
+      if ('${ev2['type']}' != 'blocked') data.remove('retries');
+    } else {
+      data
+        ..remove('via')
+        ..remove('viaServer');
+    }
+    ev2['type'] = type; // the same event, its kind follows the nodes
+    eventBook.update(id, data: data, replaceData: true);
+    logBook.note(opens ? 'info' : 'warn', '$dest ${opens ? 'opens' : 'does not open'} through $from: checked again');
+    return out;
+  }
+
   /// Priority order live (api.dart): only the order of a group changed -> Auto / Fallback reorder, no restart.
   @override
   Future<Map<String, dynamic>> applyOrder(Map<String, dynamic> plan) async {
@@ -2450,7 +2579,10 @@ class CoreService implements CoreApi {
     if (ignoredSites.matches('${data['host']}')) throw const FormatException('The site is ignored');
     _checking.add(id as int);
     try {
-      eventBook.update(id, data: {'check': {'state': 'pending', 'at': _now().millisecondsSinceEpoch, 'manual': true}});
+      // the shown outcome stays while the new check runs
+      final before = data['check'];
+      final shown = before is Map && const {'opens', 'down', 'failed'}.contains(before['state']) ? (<String, dynamic>{...before.cast<String, dynamic>()}..remove('prev')) : null;
+      eventBook.update(id, data: {'check': {'state': 'pending', 'at': _now().millisecondsSinceEpoch, 'manual': true, 'prev': ?shown}});
       await _checkSiteEvent(id, '${data['host']}', (data['port'] as num?)?.toInt(), manual: true);
     } finally {
       _checking.remove(id);

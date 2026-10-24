@@ -1898,5 +1898,7 @@
   "via tunnel": "viaTunnel",
   "direct": "direct4",
   "opens on {#0} of {#1} node": "opensOnOfNode",
-  "opens on {#0} of {#1} nodes": "opensOnOfNodesPlural"
+  "opens on {#0} of {#1} nodes": "opensOnOfNodesPlural",
+  "opened": "opened",
+  "did not open": "didNotOpen"
 }

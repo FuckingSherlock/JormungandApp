@@ -644,6 +644,9 @@ abstract class CoreHost extends ChangeNotifier {
   /// True = the core rechecked it; false = it did not (no core, not connected, no such event). Never throws.
   Future<bool> recheckSite(int eventId) async => false;
 
+  /// The recheck of one node row of a site event ([node] = node key): true = the core checked it. Never throws.
+  Future<bool> recheckSiteNode(int eventId, String node) async => false;
+
   /// «Retry» of a `rules/ruleSetFailed` event: the core downloads its lists again. Never throws.
   Future<void> retryRuleSets(int eventId) async {}
 
