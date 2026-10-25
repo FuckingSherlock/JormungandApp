@@ -18,6 +18,12 @@ namespace {
 
 constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
 
+// The smallest window, in physical pixels of its visible frame (the invisible
+// resize borders come on top), the same at any display scale. A screen whose
+// work area is smaller caps it, so the window always fits.
+constexpr int kMinWindowWidth = 500;
+constexpr int kMinWindowHeight = 900;
+
 /// Registry key for app theme preference.
 ///
 /// A value of 0 indicates apps should use dark mode. A non-zero or missing
@@ -195,6 +201,34 @@ Win32Window::MessageHandler(HWND hwnd,
       SetWindowPos(hwnd, nullptr, newRectSize->left, newRectSize->top, newWidth,
                    newHeight, SWP_NOZORDER | SWP_NOACTIVATE);
 
+      return 0;
+    }
+    case WM_GETMINMAXINFO: {
+      auto info = reinterpret_cast<MINMAXINFO*>(lparam);
+      LONG width = kMinWindowWidth;
+      LONG height = kMinWindowHeight;
+      // the track size is the whole window: add the invisible borders around
+      // the visible frame
+      RECT window_rect;
+      RECT frame_rect;
+      if (GetWindowRect(hwnd, &window_rect) &&
+          SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS,
+                                          &frame_rect, sizeof(frame_rect)))) {
+        width += (window_rect.right - window_rect.left) -
+                 (frame_rect.right - frame_rect.left);
+        height += (window_rect.bottom - window_rect.top) -
+                  (frame_rect.bottom - frame_rect.top);
+      }
+      HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+      MONITORINFO monitor_info{sizeof(MONITORINFO)};
+      if (GetMonitorInfo(monitor, &monitor_info)) {
+        LONG work_width = monitor_info.rcWork.right - monitor_info.rcWork.left;
+        LONG work_height = monitor_info.rcWork.bottom - monitor_info.rcWork.top;
+        if (width > work_width) width = work_width;
+        if (height > work_height) height = work_height;
+      }
+      info->ptMinTrackSize.x = width;
+      info->ptMinTrackSize.y = height;
       return 0;
     }
     case WM_SIZE: {

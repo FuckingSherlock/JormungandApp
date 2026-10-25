@@ -26,10 +26,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
-  Win32Window::Size size(1280, 720);
+  Win32Window::Size size(500, 900);
   if (!window.Create(L"jormungand", origin, size)) {
     return EXIT_FAILURE;
   }
+  // open at the smallest size: Create scales by DPI, the minimum is in physical
+  // pixels (WM_GETMINMAXINFO in win32_window.cpp raises 0x0 to it)
+  ::SetWindowPos(window.GetHandle(), nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
   window.SetQuitOnClose(true);
 
   ::MSG msg;
