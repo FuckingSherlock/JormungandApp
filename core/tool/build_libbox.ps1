@@ -4,7 +4,7 @@
 # bump does not drift), arm64 only (the app ships arm64-v8a only; -Targets adds others).
 # The sources are the core's fork: Leadaxe/sing-box-lx (XHTTP, REALITY PQ key share, VLESS PQ
 # encryption; its build_libbox/main.go sharedTags already carry with_xhttp and the lx tags), so
-# libbox matches the desktop binary in core/tool/bin. -Repo builds an older/other sing-box.
+# libbox matches the desktop binary in core/tool/bin. -SingBoxRepo builds an older/other sing-box.
 #
 #   pwsh core/tool/build_libbox.ps1                 # version of core/tool/bin/sing-box
 #   pwsh core/tool/build_libbox.ps1 -Version 1.14.3 # an explicit one
@@ -25,7 +25,9 @@
 [CmdletBinding()]
 param(
     [string]$Version,
-    [string]$Repo = 'https://github.com/Leadaxe/sing-box-lx.git',
+    # NOT $Repo: the script already has a case-insensitive $repo (the app repo dir) — a param of the
+    # same name would be silently overwritten by it on the second assignment.
+    [string]$SingBoxRepo = 'https://github.com/Leadaxe/sing-box-lx.git',
     [string[]]$Targets = @('android/arm64'),
     [int]$AndroidApi = 24,
     [string]$Root = 'G:\ANDROID_DEV',
@@ -95,7 +97,7 @@ $goRoot = Pick 'GOROOT' (Join-Path $Root 'go')
 $goPath = Pick 'GOPATH' (Join-Path $Root 'gopath')
 New-Item -ItemType Directory -Force $goPath | Out-Null
 # one checkout per repo: an existing checkout keeps its origin, a repo switch would fetch the old remote
-$repoName = (Split-Path $Repo -Leaf) -replace '\.git$', ''
+$repoName = (Split-Path $SingBoxRepo -Leaf) -replace '\.git$', ''
 $srcDir = Join-Path $Root "src/$repoName"
 
 if (-not (Test-Path (Join-Path $javaHome "bin/javac$exe"))) { Fail "JDK 17 not found (JAVA_HOME / $javaHome)" }
@@ -144,7 +146,7 @@ if ($javaOut -notmatch '17\.') { Write-Host "warning: JDK is not 17: $($javaOut.
 $tag = "v$Version"
 if (-not (Test-Path (Join-Path $srcDir '.git'))) {
     New-Item -ItemType Directory -Force (Split-Path $srcDir) | Out-Null
-    Run 'git' @('clone', '--depth', '1', '--branch', $tag, $Repo, $srcDir)
+    Run 'git' @('clone', '--depth', '1', '--branch', $tag, $SingBoxRepo, $srcDir)
 } else {
     Run 'git' @('-C', $srcDir, 'fetch', '--depth', '1', 'origin', "refs/tags/${tag}:refs/tags/${tag}")
     Run 'git' @('-C', $srcDir, 'checkout', '--force', '--detach', $tag)
