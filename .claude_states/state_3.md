@@ -2,7 +2,39 @@
 
 Продолжение `archive/2026-10-16_state_2.md` (история beta.10–12; решения пользователя и техдолг оттуда перенесены
 ниже). Сделанное одной строкой — `archive/done.md`. Ветка `claude/core-mvp`, всё влито в основную
-(`claude/karing-fork-environment-a45c2c`). Последняя бета — **beta.12** (выпущена 2026-10-16).
+(`claude/karing-fork-environment-a45c2c`). Последняя бета — **0.1.3-beta.5** (сборка 3078, коммит
+c931a5c, 2026-10-24; текст = текущий `beta.txt`: DNS-события + карточка сайта). Номер следующей
+берёт CI из фида: **0.1.3-beta.6** — указание пользователя 2026-11-14: после зелёных тестов
+сразу сборка беты; `beta.txt` перезаписать только дельтой после c931a5c (карточка: перепроверка
+рядов, значки/копирование хоста) + миграция ядра (формулировка пользователя: миграция для
+восстановления xhttp и vless, сломанных апдейтом Xray).
+
+## Миграция ядра на sing-box-lx (2026-11-14) — в работе
+
+Решил пользователь: ядро переходим с sing-box 1.14.2 (апстрим) на форк `Leadaxe/sing-box-lx`
+`v1.14.4-lx.33` (реальность X25519MLKEM768 по умолчанию, XHTTP-клиент, VLESS PQ encryption).
+Детали разведки — `glm_notes/core-research-2026-11-14.md`. План:
+- **A (сделано):** бинарь `1.14.4-lx.33` (windows-amd64, SHA256 сверён) в `core/tool/bin/`
+  (sing-box.exe + libcronet.dll из архива; bin был пуст — старого бинаря не было).
+- **B (сделано):** матрица `core/test/lx_matrix_test.dart` — 10 кейсов против Xray 26.11.9
+  (`core/tool/bin/xray/`), все зелёные дважды (~13 с): reality+PQ key share (auto/packet-up/stream-up/
+  stream-one/xmux/plain-TLS/hybrid), PQ encryption (X25519 + ML-KEM-768 из `xray vlessenc`), негативный
+  `classical` (падает как надо). Открытия: vision несовместим с xhttp (lx отказывается СТАРТОВАТЬ такой
+  outbound); серверу Xray нужен явный `path` в xhttpSettings; Xray 26.x blackhole'ит loopback в freedom
+  без finalRules. Dart для прогонов — portable 3.14.0 в `%TEMP%\dart-sdk-dl\sdk314` (флаттера/дарта на
+  машине нет).
+- **C (сделано):** парсер — xhttp-транспорт (host/path/mode; неизвестный режим → unsupported), vless
+  `encryption` проброс как есть, clash `xhttp-opts`, share.dart roundtrip, flow vision отбрасывается на
+  non-raw (мой фикс: lx падает на старте — одна ссылка убивала бы весь конфиг), фикстуры с настоящими
+  ключами (форк валидирует pbk/encryption). `dart analyze` чисто, parse/share/singbox 49 зелёных.
+  Найдено: `variantOf` не учитывает mode → `found_bugs.md`. Полный прогон ядра — в работе (test-runner).
+- **C:** workflow — build_libbox.ps1 (URL/тег форка) + CI `release-android.yml`
+  (`SING_BOX_VERSION: '1.14.4-lx.33'`, репо форка), sbapi-протo (сверка 1.14.2 → 1.14.4),
+  xhttp в `parse/build.dart` (сейчас `unsupported('xhttp')`), golden каталога («XHTTP is not
+  in sing-box» в `catalog_golden_test.dart` + `golden/catalog.json`), доки.
+- **D:** полный прогон ядра (и приложения), коммит; APK-сборка на проверку телефона — по
+  запросу (деплой — только по явному «деплой»). jormd не трогаем: десктоп-мокап вне этой
+  работы (указание пользователя 2026-11-14).
 
 ## Следующая сессия — начать с этого
 

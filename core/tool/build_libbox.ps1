@@ -2,6 +2,9 @@
 # core/tool/bin pins, the build tags and linker flags sing-box's own Android build uses
 # (cmd/internal/build_libbox/main.go + release/LDFLAGS are READ from the checkout, so a version
 # bump does not drift), arm64 only (the app ships arm64-v8a only; -Targets adds others).
+# The sources are the core's fork: Leadaxe/sing-box-lx (XHTTP, REALITY PQ key share, VLESS PQ
+# encryption; its build_libbox/main.go sharedTags already carry with_xhttp and the lx tags), so
+# libbox matches the desktop binary in core/tool/bin. -Repo builds an older/other sing-box.
 #
 #   pwsh core/tool/build_libbox.ps1                 # version of core/tool/bin/sing-box
 #   pwsh core/tool/build_libbox.ps1 -Version 1.14.3 # an explicit one
@@ -22,6 +25,7 @@
 [CmdletBinding()]
 param(
     [string]$Version,
+    [string]$Repo = 'https://github.com/Leadaxe/sing-box-lx.git',
     [string[]]$Targets = @('android/arm64'),
     [int]$AndroidApi = 24,
     [string]$Root = 'G:\ANDROID_DEV',
@@ -78,7 +82,7 @@ if (-not $Version) {
         $m = [regex]::Match((& $bin version | Out-String), 'sing-box version (\d+\.\d+\.\d+\S*)')
         if ($m.Success) { $Version = $m.Groups[1].Value }
     }
-    if (-not $Version) { $Version = '1.14.2'; Write-Host "no core/tool/bin/sing-box, using $Version" }
+    if (-not $Version) { $Version = '1.14.4-lx.33'; Write-Host "no core/tool/bin/sing-box, using $Version" }
 }
 $Version = $Version.TrimStart('v')
 Write-Host "libbox for sing-box $Version"
@@ -90,7 +94,9 @@ if (-not (Test-Path $sdk)) { $sdk = Pick 'ANDROID_SDK_ROOT' (Join-Path $Root 'an
 $goRoot = Pick 'GOROOT' (Join-Path $Root 'go')
 $goPath = Pick 'GOPATH' (Join-Path $Root 'gopath')
 New-Item -ItemType Directory -Force $goPath | Out-Null
-$srcDir = Join-Path $Root 'src/sing-box'
+# one checkout per repo: an existing checkout keeps its origin, a repo switch would fetch the old remote
+$repoName = (Split-Path $Repo -Leaf) -replace '\.git$', ''
+$srcDir = Join-Path $Root "src/$repoName"
 
 if (-not (Test-Path (Join-Path $javaHome "bin/javac$exe"))) { Fail "JDK 17 not found (JAVA_HOME / $javaHome)" }
 if (-not (Test-Path (Join-Path $goRoot "bin/go$exe"))) {
@@ -138,7 +144,7 @@ if ($javaOut -notmatch '17\.') { Write-Host "warning: JDK is not 17: $($javaOut.
 $tag = "v$Version"
 if (-not (Test-Path (Join-Path $srcDir '.git'))) {
     New-Item -ItemType Directory -Force (Split-Path $srcDir) | Out-Null
-    Run 'git' @('clone', '--depth', '1', '--branch', $tag, 'https://github.com/SagerNet/sing-box.git', $srcDir)
+    Run 'git' @('clone', '--depth', '1', '--branch', $tag, $Repo, $srcDir)
 } else {
     Run 'git' @('-C', $srcDir, 'fetch', '--depth', '1', 'origin', "refs/tags/${tag}:refs/tags/${tag}")
     Run 'git' @('-C', $srcDir, 'checkout', '--force', '--detach', $tag)

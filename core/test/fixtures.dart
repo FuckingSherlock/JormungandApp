@@ -10,7 +10,11 @@ const vlessWs = 'vless://11111111-2222-3333-4444-555555555555@nl1.example:8443?t
 // Same server as vlessWs, different connection variant (no early data, different path/host/sni).
 const vlessWsVariant =
     'vless://11111111-2222-3333-4444-555555555555@nl1.example:8443?type=ws&security=tls&path=%2Fws2&host=cdn2.example&sni=cdn2.example#NL%20WS%202';
-const vlessXhttp = 'vless://11111111-2222-3333-4444-555555555555@fi1.example:443?type=xhttp&security=reality&pbk=abc&sni=a.example#FI%20XHTTP';
+// The pbk must be a well-formed 32-byte key: supported nodes go through `sing-box check`.
+const vlessXhttp =
+    'vless://11111111-2222-3333-4444-555555555555@fi1.example:443?type=xhttp&security=reality&pbk=Z84J2IelR9ch3k8VtlVhhs5ycBUlXA7wHBWcBrjqnAw&sni=a.example#FI%20XHTTP';
+const vlessXhttpPq =
+    'vless://11111111-2222-3333-4444-555555555555@fi2.example:443?type=xhttp&mode=stream-up&path=/xd&host=h.example&encryption=mlkem768x25519plus.native.0rtt.9p7Zzcm8WnRfJJfDfqUiX7fPIaO04OpCQxuvVHNya0M&security=tls&sni=a.example#FI%20XHTTP%20PQ';
 const trojanGrpc = 'trojan://secret-pass@se1.example:443?type=grpc&serviceName=tun&sni=se1.example#SE';
 final ssSip002 = 'ss://${_b64('aes-256-gcm:password')}@192.0.2.10:8388#PL%20SS';
 const ss2022 = 'ss://2022-blake3-aes-128-gcm:AAAAAAAAAAAAAAAAAAAAAA%3D%3D@192.0.2.11:8389#SS2022';
@@ -36,17 +40,19 @@ const hysteria1 =
 const vlessQuic = 'vless://11111111-2222-3333-4444-555555555555@ca1.example:443?type=quic&security=tls&sni=ca1.example#CA%20QUIC';
 
 final allLinks = [
-  vlessReality, vlessWs, vlessWsVariant, vlessXhttp, trojanGrpc, ssSip002, ss2022, ssLegacy, hy2, hy2SniOff, tuic, anytls, vmessJson,
-  vmessUri, socksB64, socks5Plain, hysteria1, vlessQuic,
+  vlessReality, vlessWs, vlessWsVariant, vlessXhttp, vlessXhttpPq, trojanGrpc, ssSip002, ss2022, ssLegacy, hy2, hy2SniOff, tuic, anytls,
+  vmessJson, vmessUri, socksB64, socks5Plain, hysteria1, vlessQuic,
 ];
 
 // Servers sing-box cannot run: listed as unsupported, never in a config.
 const wireguardLink = 'wireguard://cHJpdmF0ZWtleQ%3D%3D@203.0.113.5:51820?publickey=cHVibGlj&address=10.0.0.2%2F32#WG%20Home';
 final ssrLink = 'ssr://${base64Url.encode(utf8.encode('203.0.113.6:8388:auth_aes128_md5:aes-256-cfb:tls1.2_ticket_auth:'
     '${base64Url.encode(utf8.encode('pw'))}/?remarks=${base64Url.encode(utf8.encode('SSR Old'))}'))}';
+final unsupportedLinks = [wireguardLink, ssrLink];
+
+// VLESS PQ encryption parses now (parse-only: its made-up key is not a valid one for sing-box).
 const vlessEncrypted =
     'vless://11111111-2222-3333-4444-555555555555@mx1.example:443?type=tcp&security=tls&sni=mx1.example&encryption=mlkem768x25519plus.native.0rtt.abc#MX%20PQ';
-final unsupportedLinks = [wireguardLink, ssrLink, vlessEncrypted];
 
 // Every Clash type and transport the parser knows, one of each.
 const clashMore = '''
@@ -62,7 +68,7 @@ proxies:
   - {name: HTTP TLS, type: http, server: hp1.example, port: 443, username: u, password: p, tls: true, sni: hp1.example}
   - {name: SSH, type: ssh, server: 192.0.2.51, port: 22, username: root, password: ssh-pass}
   - {name: WG, type: wireguard, server: 203.0.113.7, port: 51820, private-key: cHJpdmF0ZQ==, public-key: cHVibGlj, ip: 10.0.0.3}
-  - {name: VL PQ, type: vless, server: vl3.example, port: 443, uuid: 11111111-2222-3333-4444-555555555555, tls: true, encryption: mlkem768x25519plus.native.0rtt.abc}
+  - {name: VL PQ, type: vless, server: vl3.example, port: 443, uuid: 11111111-2222-3333-4444-555555555555, tls: true, encryption: mlkem768x25519plus.native.0rtt.9p7Zzcm8WnRfJJfDfqUiX7fPIaO04OpCQxuvVHNya0M}
   - {name: Direct, type: direct}
 ''';
 

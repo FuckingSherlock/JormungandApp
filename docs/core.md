@@ -4,9 +4,17 @@
 как зависимость. Пока приложения нет, ядро работает как локальный демон `jormd`: он отдаёт
 мокап как веб-интерфейс, мокап управляет ядром через `/api`.
 
-Ядро — только sing-box (1.14.x, бинарник в `core/tool/bin/`, в git не хранится).
-Xray не подключён; ноды, которых sing-box не умеет (XHTTP), показываются, но в конфиг не идут
-(`node.unsupported`). Если понадобится — Xray сбоку только для таких нод.
+Ядро — только sing-box: форк **`Leadaxe/sing-box-lx`** (база апстрима 1.14.4, релизы `v1.14.4-lx.N`),
+бинарь в `core/tool/bin/`, в git не хранится; libbox.aar для Android собирается из того же дерева
+(`core/tool/build_libbox.ps1`, CI-пин — `SING_BOX_VERSION` в `release-android.yml`). Против апстрима
+форк добавляет: транспорт **XHTTP** (`transport.type: "xhttp"`, режимы `auto` / `packet-up` / `stream-up` /
+`stream-one`, пустой — auto; REALITY → stream-one, без — packet-up), REALITY с post-quantum key share
+(дефолт — «как в отпечатке uTLS»: парсер ставит reality-нодам fingerprint `chrome`, его ClientHello несёт
+X25519MLKEM768 — требование серверов Xray ≥26.9.8 закрыто; опцию `key_share: classical|hybrid` конфиг не пишет)
+и VLESS post-quantum encryption (поле `encryption` outbound, строка `mlkem768x25519plus…` из ссылки
+пробрасывается как есть). Ноды, которых форк не умеет (kcp), показываются, но в конфиг не идут
+(`node.unsupported`). API (`sbapi`) — gRPC `services: [{type: api}]`; прото берётся из релиза в
+`tool/bin` (`tool/gen_sbapi.sh`).
 
 ## Запуск
 
@@ -1480,8 +1488,8 @@ insecure), ss — SIP002 (у шифров 2022 userinfo без base64). Имя �
 Разобранная обратно ссылка даёт тот же `key` и тот же outbound (тест `share_test.dart`).
 socks — `socks5://user:pass@host:port` (`socks4://` для v4), Hysteria v1 — `hysteria://host:port?auth=…`.
 Нет ссылки у http/wireguard
-из подписок и у `unsupported`-нод (их outbound без
-xhttp — ссылка назвала бы другой сервер).
+из подписок и у `unsupported`-нод (их outbound не собирается
+обратно — например kcp: транспорт потерялся бы, и ссылка назвала бы другой сервер).
 
 Сервер вручную (`manual.dart`): протокол, адрес, порт, секрет формы (UUID / пароль;
 `method:password` у ss, `uuid:password` у tuic, `user:password` у socks — необязательно).

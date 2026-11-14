@@ -352,7 +352,7 @@ extension CatalogPlan on Catalog {
 
   /// Why the rule / app target [t] cannot carry traffic now, null = it can (or it is the main flow): `deleted`,
   /// `off` (switched off in Nodes, its source or servers), `noServers` (nothing left to connect through) or
-  /// `unsupported` (only servers sing-box cannot run, e.g. XHTTP). docs/rules.md §0 «Потерянная цель».
+  /// `unsupported` (only servers sing-box cannot run, e.g. KCP). docs/rules.md §0 «Потерянная цель».
   String? targetLoss(String t) {
     if (t.isEmpty) return null;
     if (!t.contains(':')) t = _entryTarget(t) ?? t;
@@ -430,7 +430,7 @@ extension CatalogPlan on Catalog {
       }
       return {'kind': 'chain', ..._planChain(chainsData[ref]!)};
     } on Object {
-      // nothing here sing-box can use (XHTTP only) — and, like the mockup's catch-all, a target that is
+      // nothing here sing-box can use (KCP only) — and, like the mockup's catch-all, a target that is
       // a bare id of a source ('src1': the chain branch finds no chain): unavailable
       return null;
     }

@@ -12,7 +12,7 @@ import 'node.dart';
 ///
 /// Null when there is no link form: protocols only a sing-box / Clash subscription
 /// carries (http, wireguard…) and servers marked [Node.unsupported] — their
-/// outbound lacks what sing-box could not take (e.g. the xhttp transport), so a link
+/// outbound lacks what sing-box could not take (e.g. the kcp transport), so a link
 /// built from it would name a different server.
 String? shareLink(Map<String, dynamic> outbound, {String name = '', String flag = '', String? unsupported}) {
   if (unsupported != null) return null;
@@ -27,7 +27,7 @@ String? shareLink(Map<String, dynamic> outbound, {String name = '', String flag 
   switch (outbound['type']) {
     case 'vless':
       return 'vless://${_enc(s('uuid'))}@$host:$port'
-          '${_query({'encryption': 'none', 'flow': outbound['flow'], ..._tlsParams(tls, insecureKey: 'allowInsecure'), ..._transportParams(tr)})}'
+          '${_query({'encryption': outbound['encryption'] ?? 'none', 'flow': outbound['flow'], ..._tlsParams(tls, insecureKey: 'allowInsecure'), ..._transportParams(tr)})}'
           '${_frag(label)}';
     case 'vmess':
       final t = _transportParams(tr);
@@ -170,6 +170,8 @@ Map<String, String?> _transportParams(Map<String, dynamic>? tr) {
       return {'type': 'http', 'host': tr['host'] is List ? (tr['host'] as List).join(',') : tr['host'] as String?, 'path': tr['path'] as String?};
     case 'httpupgrade':
       return {'type': 'httpupgrade', 'host': tr['host'] as String?, 'path': tr['path'] as String?};
+    case 'xhttp':
+      return {'type': 'xhttp', 'path': tr['path'] as String?, 'host': tr['host'] as String?, 'mode': tr['mode'] as String?};
   }
   return {'type': '${tr['type']}'};
 }

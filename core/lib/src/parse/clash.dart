@@ -76,6 +76,17 @@ Node? clashProxy(Map<String, dynamic> p) {
       final path = h2['path'];
       if (path != null) q['path'] = path is List ? '${path.first}' : '$path';
       if (network == 'http' && q['security'] != 'tls') q['type'] = 'tcp'; // HTTP header obfs, not a transport
+    case 'xhttp' || 'splithttp':
+      final xo = m('xhttp-opts');
+      final mode = '${xo['mode'] ?? ''}';
+      if (mode.isNotEmpty) q['mode'] = mode;
+      if (xo['path'] != null && '${xo['path']}'.isNotEmpty) q['path'] = '${xo['path']}';
+      final h = xo['host'];
+      if (h is List && h.isNotEmpty) {
+        q['host'] = h.join(',');
+      } else if (h != null && '$h'.isNotEmpty) {
+        q['host'] = '$h';
+      }
   }
 
   switch (type) {

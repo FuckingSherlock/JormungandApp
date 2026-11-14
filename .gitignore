@@ -10,6 +10,9 @@ design/.artifact/
 # workflow calls saved by the launch hook until the user confirms
 .claude_states/pending-workflows/
 
+# agent's own research notes (not part of the project docs)
+glm_notes/
+
 # Android build: libbox built locally, release keystore config
 app/android_overlay/app/libs/
 app/android/key.properties

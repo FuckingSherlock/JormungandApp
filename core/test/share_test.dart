@@ -47,6 +47,14 @@ void main() {
       }
     });
 
+    test('xhttp transport (plain and with mode) and PQ encryption round-trip', () {
+      _roundTrip(parseLink(vlessXhttp)!);
+      _roundTrip(parseLink(vlessXhttpPq)!);
+      final back = parseLink(shareLinkOf(parseLink(vlessXhttpPq)!)!)!;
+      expect(back.outbound['encryption'], 'mlkem768x25519plus.native.0rtt.9p7Zzcm8WnRfJJfDfqUiX7fPIaO04OpCQxuvVHNya0M');
+      expect(back.outbound['transport'], {'type': 'xhttp', 'path': '/xd', 'host': 'h.example', 'mode': 'stream-up'});
+    });
+
     test('harder cases: IPv6, grpc + alpn + insecure, vmess over Reality, ss plugin, hy2 hop ranges, odd names', () {
       final links = [
         'vless://$_uuid@[2001:db8::1]:443?security=tls&sni=v6.example&alpn=h2,http%2F1.1&allowInsecure=1&type=grpc&serviceName=g#v6%20%23%201',

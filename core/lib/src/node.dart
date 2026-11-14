@@ -12,7 +12,7 @@ import 'package:crypto/crypto.dart';
 /// seen; an update may keep an older id on a server whose variant changed (see merge.dart),
 /// so settings naming it survive. [seq] tells apart servers of one source with the same
 /// name ("VK-1", "VK-2"); it sticks to the server across updates.
-/// [unsupported] names what sing-box cannot do for this server (e.g. `xhttp`): the node
+/// [unsupported] names what sing-box cannot do for this server (e.g. `kcp`): the node
 /// is listed but never put into a config.
 class Node {
   Node({

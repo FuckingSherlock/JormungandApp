@@ -57,9 +57,6 @@
 
 ## Решения
 
-- **Поддержка xhttp (VLESS)** (2026-10-20, пользователь «если возможно»): сейчас `xhttp` / `splithttp` → unsupported
-  (`core/lib/src/parse/build.dart:102`), в апстримном sing-box транспорта нет. Разобрать (`analyzer`): какие форки
-  sing-box его умеют (hiddify-core и др.), есть ли он у Karing, цена перехода на форк / своего патча в libbox и jormd.
 
 - **Выбор маршрутов для перепроверки сайта** (2026-10-14). Сейчас сайт, не открывшийся через живую ноду, повторяется
   через «другие записи Auto, которые отвечают», в порядке Auto, до `siteRetry` штук (`connect-model.md:500–513`) —
@@ -126,3 +123,25 @@
   (UA, при котором панель его отдаёт; перевод `fragment` → `tls.fragment`, `dialerProxy` → `detour`).
 
 - **Цепочки remna: HY2-выходы «недоступны»** (отложено пользователем 2026-10-15): работают то HY2, то VLESS — сложнее, зависит от входов. Ждёт отдельного разбора.
+
+- **Переход на mihomo** (2026-11-14, записано по явному указанию пользователя; решение по текущему ядру —
+  sing-box-lx). mihomo (MetaCubeX, v1.19.34 от 11.11.2026, релизы режутся из ветки `Alpha`) даёт полный протокольный
+  паритет Xray (VLESS+REALITY с `support-x25519mlkem768` с v1.19.31, VLESS PQ encryption 1rtt/0rtt, XHTTP-клиент,
+  hysteria2, TUN) + полноценный API, которого нет ни у sing-box, ни у xray: REST/WS `/connections` (стрим таблицы
+  с байтами), `DELETE /connections/{id}` (закрытие по id), `PUT /proxies` (живое переключение селекторов),
+  `/traffic`, `/logs`, `/memory`; IPC через unix-socket и Windows named pipe; `profile.store-selected`. Trust выше
+  всех (35k★, мульти-мейнтейнер). План перехода (триггеры: sing-box-lx не пройдёт аудит/проверку или застагнирует;
+  стратегический уход с sing-box-линейки):
+  1. Конфиг-модель: план → mihomo YAML (proxies, proxy-groups = селекторы с `store-selected`, rules, DNS
+     fakeip/respect-rules, rule-sets .srs → .mrs/текст rule-providers, перевод `resolve`-действий).
+  2. Раннеры: Windows — процесс `mihomo.exe` (аналог `SingBoxProcess`, Job Object переиспользуется); Android —
+     платформенный слой по образцу ClashMetaForAndroid (fd-passing, protect) вместо libbox.aar; adopt/outlive
+     семантику переделать под mihomo.
+  3. API-слой: sbapi → clash-API клиент: per-connection таблица, закрытие по id, селекторы живьём — фичи (живые
+     соединения, Auto, Sentinel-улики) не деградируют, а расширяются.
+  4. Ноды: третья форма outbound (mihomo YAML) без смены identity (`variantOf`/`serverIdentity`); парсеры —
+     Clash YAML mihomo ест нативно, Remnawave отдаёт clash/mihomo-формат подписок.
+  5. Sentinel: грамматика логов mihomo (WS `/logs`, закрытые соединения — диффом таблицы).
+  6. Тесты/golden, обновления (CI-пин версии mihomo, поставка бинарника/AAR).
+  Цена сопоставима с «новый клиент с нуля»; поведение `support-x25519mlkem768` по умолчанию уточнить тестом против
+  Xray ≥26.9.8. Детали разведки: `glm_notes/core-research-2026-11-14.md`.

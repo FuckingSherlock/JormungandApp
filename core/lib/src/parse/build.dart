@@ -54,7 +54,7 @@ Map<String, dynamic>? buildTls(Params q, {required bool defaultOn}) {
 }
 
 /// sing-box `transport` block, or the name of a transport sing-box lacks
-/// (xhttp, kcp, quic…) as the second value.
+/// (kcp, quic…) as the second value.
 (Map<String, dynamic>?, String?) buildTransport(Params q) {
   final type = (q['type'] ?? 'tcp').toLowerCase();
   final host = q['host'];
@@ -100,7 +100,19 @@ Map<String, dynamic>? buildTls(Params q, {required bool defaultOn}) {
       final sec = (q['quicSecurity'] ?? 'none').toLowerCase();
       return sec == 'none' || sec.isEmpty ? ({'type': 'quic'}, null) : (null, 'quic $sec');
     case 'xhttp' || 'splithttp':
-      return (null, 'xhttp');
+      final mode = (q['mode'] ?? '').trim().toLowerCase();
+      if (mode.isNotEmpty && !const {'auto', 'packet-up', 'stream-up', 'stream-one'}.contains(mode)) {
+        return (null, 'xhttp mode');
+      }
+      return (
+        {
+          'type': 'xhttp',
+          if (host != null && host.isNotEmpty) 'host': host,
+          if (path != null && path.isNotEmpty) 'path': path,
+          if (mode.isNotEmpty) 'mode': mode,
+        },
+        null
+      );
     default:
       return (null, type);
   }
@@ -116,16 +128,22 @@ void _addTransport(Map<String, dynamic> ob, Params q, void Function(String) unsu
 
 Node buildVless({required String name, required String host, required int port, required String uuid, required Params q}) {
   final ob = <String, dynamic>{'type': 'vless', 'server': host, 'server_port': port, 'uuid': uuid};
-  final flow = q['flow'];
-  // sing-box knows only plain vision (…-udp443 is an Xray variant of the same flow).
-  if (flow != null && flow.startsWith('xtls-rprx-vision')) ob['flow'] = 'xtls-rprx-vision';
   final tls = buildTls(q, defaultOn: false);
   if (tls != null) ob['tls'] = tls;
   String? bad;
   _addTransport(ob, q, (b) => bad = b);
-  // Xray's VLESS encryption (mlkem768x25519plus…): sing-box has none, the server would not talk to it.
-  final enc = (q['encryption'] ?? 'none').trim().toLowerCase();
-  if (enc.isNotEmpty && enc != 'none') bad ??= 'vless encryption';
+  final flow = q['flow'];
+  // sing-box knows only plain vision (…-udp443 is an Xray variant of the same flow), and vision
+  // needs raw TCP (Xray's own constraint; sing-box-lx refuses to START a vision outbound on any
+  // other transport — one such link would kill the whole config): a flow on ws / grpc / http* /
+  // xhttp does nothing there anyway, so the parser drops it.
+  if (flow != null && flow.startsWith('xtls-rprx-vision') && ob['transport'] == null) {
+    ob['flow'] = 'xtls-rprx-vision';
+  }
+  // Xray's VLESS encryption (mlkem768x25519plus…): sing-box-lx takes the spec string verbatim
+  // (it is case-sensitive); empty / none = off.
+  final enc = (q['encryption'] ?? 'none').trim();
+  if (enc.isNotEmpty && enc.toLowerCase() != 'none') ob['encryption'] = enc;
   ob['packet_encoding'] = 'xudp';
   return Node.make(name: name, protocol: 'vless', address: host, port: port, identity: uuid, outbound: ob, unsupported: bad);
 }

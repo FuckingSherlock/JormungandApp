@@ -25,8 +25,33 @@ void main() {
       expect(t['headers'], {'Host': 'cdn.example'});
     });
 
-    test('xhttp is listed but marked unsupported', () {
-      expect(parseLink(vlessXhttp)!.unsupported, 'xhttp');
+    test('xhttp transport goes to sing-box', () {
+      final n = parseLink(vlessXhttp)!;
+      expect(n.unsupported, isNull);
+      expect(n.outbound['transport'], {'type': 'xhttp'});
+    });
+
+    test('vision flow is dropped on a non-raw transport (lx refuses to start it), kept on raw', () {
+      final link = vlessXhttp.replaceFirst('#FI%20XHTTP', '&flow=xtls-rprx-vision#FI%20XHTTP');
+      final n = parseLink(link)!;
+      expect(n.unsupported, isNull);
+      expect(n.outbound.containsKey('flow'), isFalse, reason: 'vision on xhttp would kill the whole config at start');
+      final raw = parseLink(vlessReality)!;
+      expect(raw.outbound['flow'], 'xtls-rprx-vision');
+    });
+
+    test('xhttp with mode and PQ encryption carried verbatim', () {
+      final n = parseLink(vlessXhttpPq)!;
+      expect(n.unsupported, isNull);
+      expect(n.outbound['transport'], {'type': 'xhttp', 'path': '/xd', 'host': 'h.example', 'mode': 'stream-up'});
+      expect(n.outbound['encryption'], 'mlkem768x25519plus.native.0rtt.9p7Zzcm8WnRfJJfDfqUiX7fPIaO04OpCQxuvVHNya0M');
+      expect(parseLink(vlessXhttpPq.replaceFirst('mode=stream-up', 'mode=bogus'))!.unsupported, 'xhttp mode');
+      expect(
+          parseLink(vlessXhttpPq.replaceFirst(
+                  'encryption=mlkem768x25519plus.native.0rtt.9p7Zzcm8WnRfJJfDfqUiX7fPIaO04OpCQxuvVHNya0M', 'encryption=none'))!
+              .outbound
+              .containsKey('encryption'),
+          isFalse);
     });
 
     test('shadowsocks: SIP002, 2022 plain userinfo, legacy', () {
@@ -88,11 +113,12 @@ void main() {
       expect(parseLink(vlessQuic.replaceFirst('security=tls', 'security=none'))!.unsupported, 'quic without tls');
     });
 
-    test('wireguard, ssr and VLESS encryption are listed as unsupported', () {
+    test('wireguard and ssr are listed as unsupported; VLESS PQ encryption parses now', () {
       final ns = unsupportedLinks.map(parseLink).toList();
-      expect(ns.map((n) => n!.unsupported), ['wireguard', 'ssr', 'vless encryption']);
+      expect(ns.map((n) => n!.unsupported), ['wireguard', 'ssr']);
       expect([ns[0]!.name, ns[0]!.address, ns[0]!.port], ['WG Home', '203.0.113.5', 51820]);
       expect([ns[1]!.name, ns[1]!.address, ns[1]!.port], ['Old', '203.0.113.6', 8388]);
+      expect(parseLink(vlessEncrypted)!.outbound['encryption'], 'mlkem768x25519plus.native.0rtt.abc');
     });
   });
 
@@ -135,8 +161,9 @@ void main() {
       expect(ns['Socks']!.outbound, containsPair('type', 'socks'));
       expect(ns['HTTP TLS']!.outbound['tls']['server_name'], 'hp1.example');
       expect(ns['SSH']!.outbound, containsPair('user', 'root'));
-      expect([ns['WG']!.unsupported, ns['VL PQ']!.unsupported], ['wireguard', 'vless encryption']);
-      expect(ns.values.where((n) => n.unsupported == null), hasLength(10));
+      expect(ns['WG']!.unsupported, 'wireguard');
+      expect(ns['VL PQ']!.outbound['encryption'], 'mlkem768x25519plus.native.0rtt.9p7Zzcm8WnRfJJfDfqUiX7fPIaO04OpCQxuvVHNya0M');
+      expect(ns.values.where((n) => n.unsupported == null), hasLength(11));
     });
 
     test('format by Content-Type and inside base64', () {

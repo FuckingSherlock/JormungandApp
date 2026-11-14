@@ -36,7 +36,7 @@ permissions:
   contents: read
 
 env:
-  SING_BOX_VERSION: '1.14.2'      # keep equal to core/tool/bin/sing-box (the desktop core)
+  SING_BOX_VERSION: '1.14.4-lx.33'  # keep equal to core/tool/bin/sing-box (the desktop core; Leadaxe/sing-box-lx, the fork build_libbox.ps1 clones)
   NDK_VERSION: '28.2.13676358'    # as in core/tool/build_libbox.ps1
   FEED_REPO: FuckingSherlock/jormungand-releases
   # versionCode = BUILD_OFFSET + run number, for BOTH channels: one workflow, so one run counter
