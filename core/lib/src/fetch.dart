@@ -19,7 +19,9 @@ const discoveryAgents = ['sing-box/1.14.2', 'mihomo/1.19.28', 'ClashMeta'];
 /// 2: protocol words leave names. 3: socks / http / ssh / hysteria / quic parsed, servers
 /// sing-box cannot run listed as unsupported, VLESS encryption flagged.
 /// 4: no uTLS on QUIC protocols, hysteria2 `pinSHA256` -> insecure, hysteria2 alpn h3 is the default.
-const parserVersion = 4;
+/// 5: the sing-box-lx core: xhttp transport built, VLESS PQ encryption carried verbatim, vision
+/// flow dropped on non-raw transports — xhttp nodes come out of "Not supported" on the first update.
+const parserVersion = 5;
 
 /// The UA chip of the subscription form → the header sent.
 String userAgentFor(String chip) => switch (chip) {
