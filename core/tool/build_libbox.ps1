@@ -151,6 +151,11 @@ if (-not (Test-Path (Join-Path $srcDir '.git'))) {
     Run 'git' @('-C', $srcDir, 'fetch', '--depth', '1', 'origin', "refs/tags/${tag}:refs/tags/${tag}")
     Run 'git' @('-C', $srcDir, 'checkout', '--force', '--detach', $tag)
 }
+# The fork builds its Go replace-dependencies from its own submodules (go.mod: replace … =>
+# ./submodules/gvisor, sing-tun, utls, wireguard-go) — without them `go build` cannot even read
+# go.mod. Only the ones under submodules/: the clients/* submodules are the platform wrappers,
+# nothing in the libbox build reads them and they are large.
+Run 'git' @('-C', $srcDir, 'submodule', 'update', '--init', '--depth', '1', '--', 'submodules/')
 
 # a finished aar for this version and these targets is kept
 $stamp = Join-Path (Split-Path $out) 'libbox.stamp'
