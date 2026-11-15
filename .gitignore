@@ -6,7 +6,6 @@ design/.artifact/
 
 .claude/worktrees/
 
-.claude/agent-memory-local/
 # workflow calls saved by the launch hook until the user confirms
 .claude_states/pending-workflows/
 

@@ -1,0 +1,1 @@
+- [App tooling quirks](project_app_scaffold.md) — generators, l10n keys, gradle via PowerShell, no dart format, test and lifecycle traps
